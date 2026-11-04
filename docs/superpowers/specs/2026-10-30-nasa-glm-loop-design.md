@@ -111,7 +111,7 @@ sequenceDiagram
     T-->>A: gate 结果 + 审查发现
     A->>A: 关卡② code review
     alt gate 全绿 + review 通过
-        A-->>U: 合入 develop（feature 分支 --no-ff）+ Linear 同步
+        A-->>U: 合入 develop（feature 分支线性合并）+ Linear 同步
     else 红 / 审查不过
         A-->>D: 打回修复（计入 2-strike 护栏）
     end
@@ -123,11 +123,13 @@ sequenceDiagram
 > （master 回到 `10b4df9`）并指示 loop 分支独立演进；随后更名 `nasa-glm-loop-hyp` →
 > `develop`，对齐 [nvie 分支模型](https://nvie.com/posts/a-successful-git-branching-model/)。
 
-- **`develop`**（worktree `../develop`）= loop 的集成分支，"最新交付的开发变更"所在。
-  一切切片、日报经关卡②后合入这里。
+- **`develop`**（worktree `../develop-hyp`，2026-11-04 由用户从 `../develop` 移至此）=
+  loop 的集成分支，"最新交付的开发变更"所在。一切切片、日报经关卡②后合入这里。
 - **切片分支 `feature/<名称>`**：从 `develop` 拉出，关卡①批准开工，关卡②通过后
-  `--no-ff` 合回 `develop` 并删除切片分支（Day 1 的 docs 类提交直接落 develop，属
-  模型允许的 trunk 提交）。
+  **线性合回** `develop`（`git rebase develop` 后 `git merge --ff-only`，不产生合并
+  提交），并删除切片分支（Day 1 的 docs 类提交直接落 develop，属模型允许的 trunk 提交）。
+  > **修订（2026-11-04，用户指示）**：原为 `--no-ff`；用户已将 develop 历史线性化，
+  > 此后统一线性合并。
 - **`master`** = 用户所有的 release 线，只接收用户发起的 release/hotfix 合并；
   **loop 任何情况下不合并、不 rebase、不 push master**。master 若前进，develop 不主动
   跟随，分叉由用户集成时主导处理。
