@@ -173,6 +173,36 @@ B2 没有可比对的绿基线（它根本不允许共享），所以"最早红"
 | 物理 PPI 注入后全 deactivate（保留 HW=1） | **更差**（3/3 红） |
 | 关掉 EL2 后台定时器（T4 no-op） | 仍红 |
 
+## 决定性实验：guest 直接轮询 IAR 也拿不到
+
+把 VM0 vCPU1 改成**忙等 + 直接轮询 `ICC_IAR1_EL1`**（既不走 `wfi`/block，也不依赖 IRQ 异常），
+同时保留 EL2 的注入：
+
+```
+XVM2: dbg poll27=0  miss=<非零>  t1=1
+```
+
+- `miss` 非零说明轮询确实在跑、接口给出的确实是 1023（spurious），不是被我们模拟吃掉；
+- `poll27=0` 说明**第一次中断之后，CPU 接口再也不会把 pending 的 LR0 交出来**；
+- EL2 侧同时实测：PPI 27 每 ~100 ms 照常触发、`CNTV_CTL=5`（ENABLE|ISTATUS，未屏蔽）、
+  `cvd>0`（已过期）、`ICH_HCR_EL2=0x401`（En=1）、`ICH_VMCR_EL2=0xff4c000a`（VENG1=1）、
+  `ICH_AP0R0/AP1R0=0`（无活动优先级）。
+
+推论：**pending 的 HW=1 LR0 被硬件丢弃/不可交付**，最可能是 ADR-0001 的模型在跨 VM 切换下
+失效——EL2 只 priority-drop、把**物理线的 Active 状态**留给 guest 通过 LR 链接去 deactivate；
+但 EL2 在每次 `vgic_restore` 里又用 `gic_ppi_set_active()` 强制写回影子里的 Active 值，
+使"物理线仍 Active ⇒ HW=1 的 LR 不会 pend"这一状态被**永久固化**（`has_pending=0`、
+guest 轮询只得到 1023）。
+
+**建议的修法（触及 ADR-0001，需关卡①评审）**：
+1. `vgic_restore` 不再写物理 Active（删除 `gic_ppi_set_active` 调用）；
+2. 死者的残留 Active 改为**拆除时清理一次**：SYSTEM_OFF sweep / CPU_OFF 时，若该 vCPU 的
+   live LR0 处于 active 且指向 vtimer，就在其 pCPU 上 deactivate 物理 PPI 27 一次；
+3. 用 xvm2 + 手工 Linux 门禁验证（计时器 + 控制台两处）。
+
+已试过并排除（含本轮）：忙等（不 block）仍红 → 排除 block/wake 路径；直接轮询 IAR 拿到 1023
+→ 排除 IRQ 异常/向量路径；正是这两条把矛头指向"物理 Active 被固化"。
+
 ## 待验证的最后一环（按可能性）
 
 1. **HW=1 LR 的 pending 位与物理线的联动**：注入后 guest 若重新武装 CNTV，物理电平落下，
