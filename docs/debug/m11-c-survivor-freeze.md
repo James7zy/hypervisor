@@ -49,9 +49,11 @@ Linux 手工门禁（双 VM 2×2-on-2 → VM1 `poweroff -f` → 读 VM0 的 `arc
   `Taking exception 1 [Trapped WFI] ... ELR 0xffff80008086870c` 与 eret，循环不止；
   `handle_wfx` 的 (1) 分支（`vgic_has_pending` 真）**不 block**，直接经 fast path 重入，
   guest 不前进、pCPU 满负荷 → 另一个 VM 的 vCPU 在该 pCPU 上被饿死。
-- **+0x80000 之谜**：该 WFI 在 `cpu_do_idle+8` = `0xffff8000807e8710`，而陷阱里的
-  ELR 是 `0xffff800080868710`——**恰好差 0x80000**，等于 guest 内核镜像的加载偏移
-  （`BOARD_LINUX_IMAGE_PA - BOARD_LINUX_RAM_PA`）。同一内核在裸 QEMU 下正常。
+- ~~**+0x80000 之谜**~~（**已澄清，非缺陷**）：`System.map` 是链接地址，而本工程把
+  Image 装在 `RAM+0x80000`，guest 运行期 VA = 链接 VA + 0x80000。用
+  `make test-qemu-xvm2`/Linux 门禁实测：**每次** WFI 陷阱的 ELR 都是
+  `0xffff80008086870c`，即运行期的 `cpu_do_idle` 的 `wfi`，正常启动时也一样。
+  该值可用于把 "运行期 VA" 与 `System.map` 对齐（+0x80000）。
 - **PSCI CPU_SUSPEND 轨迹**：失败实例中 guest 曾被 eret 到
   `__pa_symbol(cpu_resume)`（IPA `0x410a69b0`，MMU off 的 resume trampoline），
   随后第一次 WFI 陷阱的 ELR 就已经带上了 +0x80000。
@@ -75,10 +77,24 @@ Linux 手工门禁（双 VM 2×2-on-2 → VM1 `poweroff -f` → 读 VM0 的 `arc
    则问题在 `psci_cpu_suspend` 的帧保存/恢复（`regs.elr_el2` 被写入过）。
 2. 在 `handle_wfx` 的 (1) 分支加一次性诊断：当 `vgic_has_pending` 为真时读 LR0..3 的
    state 位，看究竟哪个 LR 长期 pending（若是 LR0 active+pending，则回到注入协议）。
-3. 用 xvm2 做二分：`git revert` 单片 C 的提交（T1/T1b/T2/T3/T4/T6）逐个跑
+3. **WFI 空转的直接证据**：`handle_wfx` 的 (1) 分支（`vgic_has_pending` 为真）不 block，
+   直接经 fast path 重入。把当时 live LR 打出来看过（正常 idle 时
+   `LR0 = 0x30a0_001b_0000_001b`，即 vINTID 27、HW=1、state=pending|active），
+   说明"虚拟中断 pending 但 guest 拿不到（active 掩蔽）"会让 guest 的 wfi 永远走
+   fast path：guest 不前进、pCPU 满负荷。**下一步要抓的是冻结实例里究竟是哪个 LR
+   长期 pending**（LR0 active+pending 还是 LR1/LR2 残留），用一次性诊断（陷阱第 N 次
+   后打印四只 LR + ICH_HCR/VMCR）。
+4. 用 xvm2 做二分：`git revert` 单片 C 的提交（T1/T1b/T2/T3/T4/T6）逐个跑
    `make test-qemu-xvm2`（约 5 s/次），找出引入点。
-4. 修复后用同一 xvm2 转绿 + `make test` 10 场景 + 手工 Linux 门禁连续 3 次全绿，
+5. 修复后用同一 xvm2 转绿 + `make test` 10 场景 + 手工 Linux 门禁连续 3 次全绿，
    再进测试专家复验与架构师关卡②。
+
+## 排查中被自己插桩坑过一次（记下来）
+
+一次性诊断里用 `S3_4_C12_C8_n` 读 ICH_LR，实际那是 **ICH_AP0Rn**（LR 是 `C12_C12_n`）；
+cortex-a72 只实现 AP0R0，读 AP0R1–3 触发 EL2 未定义指令 → `!VEC ESR=0x2000000`
+并停在 panic_vector → 表现为"双 guest 起不来"。**用符号名 `ICH_LR0_EL2` 等，不要手写
+S3 编码。**
 
 ## 复现环境（本机）
 
