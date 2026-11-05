@@ -83,7 +83,7 @@ class Qemu:
                 self.pending = self.pending[m.end():]
                 return m
             if time.monotonic() >= end:
-                raise AssertionError(f"timeout: {regex.pattern!r}; tail={self.pending[-300:]!r}")
+                raise TimeoutError(f"timeout: {regex.pattern!r}; tail={self.pending[-300:]!r}")
             self.read(max(0, min(0.2, end - time.monotonic())))
 
     def send(self, text):
@@ -135,12 +135,22 @@ class Qemu:
 def run(log):
     q = Qemu(log)
     try:
-        for _ in range(2):
-            q.wait(r"^=== M3\.4: busybox rootfs up — vm[01] interactive shell ===\n", 120)
+        q.wait(r"^\[hv\] vuart: .* registered\n", 20)
         q.topology()
         for vm in (0, 1):
             q.focus(vm)
-            assert f"hv.vm={vm}" in q.command("cat /proc/cmdline").split(), "wrong console focus"
+            # Guest TX is byte-interleaved: even two healthy boot banners
+            # can garble one another. A focused command reply proves boot.
+            end = time.monotonic() + 60
+            while True:
+                try:
+                    cmdline = q.command("cat /proc/cmdline", timeout=5)
+                    break
+                except TimeoutError:
+                    if time.monotonic() >= end:
+                        raise
+                    q.send("\n")
+            assert f"hv.vm={vm}" in cmdline.split(), "wrong console focus"
             assert q.command("cat /sys/devices/system/cpu/online").strip() == "0-1"
         print("boot/topology/console: PASS", flush=True)
         # SYSTEM_OFF cannot return a guest completion marker.
