@@ -69,6 +69,31 @@ Linux 手工门禁（双 VM 2×2-on-2 → VM1 `poweroff -f` → 读 VM0 的 `arc
 | Stage-2 / VMID 串台 | gdb 读 VTTBR | 排除（见上） |
 | `idle_window` 早退吃掉唤醒 | 把 WFI 改成「保持 IRQ 屏蔽再 wfi」 | 未定论：改写后 SVM 侧的窗口计数仍可失败 |
 
+## 最新证据（决定性，SVM 侧可 5 s 一次复现）
+
+用 xvm2（`svm_xvm2`，双 pCPU 共享）在 pCPU1 上抓到的现场：
+
+1. **物理侧正常**：pCPU1 的 redistributor 里 `ISENABLER0 bit27 = 1`（PPI 27 使能）、
+   `ISPENDR0 = 0`、`ISACTIVER0 = 0`；同时 `CNTV_CTL = 1`、`CNTV_CVAL` 始终约 100 ms 之后
+   ——客自己在反复重新武装物理定时器，说明**物理定时器与 PPI 使能都没问题**。
+2. **虚拟侧丢中断**：注入时 live LR0 = `0x70a0_001b_0000_001b`
+   （state=`0b01` pending、HW=1、vINTID 27 ✓），但**下一次 WFI 陷阱时 live LR0 变成
+   `0x30a0_001b_0000_001b`（state=`0b00` invalid）**，`vgic_has_pending` 因此为 0；
+   该 vCPU 从头到尾没取到过任何 vINTID 27（计数器 0）。
+3. **影子滞后于 live**：同一次陷阱里 `CNTV_CVAL` live = `0x3c0ee4b`，而
+   `v->arch.cntv_cval` = `0x35e85e8`（上次 block 时保存的值）→ 该 vCPU 在被唤醒后是经
+   **fast path（`prev == v`，自重复 pick）** 直接重入的，**没有走 `vcpu_arch_resume`**，
+   所以影子（CNTV/LR/VMCR）不再跟随 live 状态；随后任何一次 `vgic_restore` 都会用
+   **陈旧影子覆盖 live**，把刚注入的 pending 位抹掉。
+
+**据此的根因假设（下一步验证）**：`handle_wfx` case-3 的 BLOCK 之后，唤醒走
+`sched_loop` 的自重复 pick 分支（不 resume）；此时 live 状态由 guest 自己推进、影子停滞，
+一旦再有 `vcpu_arch_resume(v)`（例如被 kick 后重新 pick），`vgic_restore` 用陈旧影子写回
+LR0/CNTV，**吞掉已注入的虚拟中断** → 幸存者的定时器中断永远到不了 guest。
+验证方法：在 `vgic_restore`/`vgic_save` 处打印 LR0 与影子，确认是谁把 `0x70a0…` 写成
+`0x30a0…`；若确认，修法是让 fast-path 重入也保持影子一致（或在注入后立刻把影子当作
+authoritative，禁止 restore 覆盖「比影子更新的 live」）。
+
 ## 下一步（按优先级）
 
 1. **吃透 +0x80000**：给 guest 一个必然触发的 WFI（如刚起机的 early idle），打印陷阱
