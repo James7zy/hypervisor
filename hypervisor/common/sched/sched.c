@@ -118,6 +118,9 @@ void sched_loop(u32 pcpu)
                 vcpu_arch_load(v);
                 v->launched = true;
             }
+            /* Hardware already belongs to v even if a remote sweep makes
+             * LOAD fail. Never self-repick the old prev with v's context. */
+            prev = v;
             if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
                 continue;                   /* swept mid-load: drop */
         } else {
@@ -141,7 +144,6 @@ void sched_loop(u32 pcpu)
                     continue;
             }
         }
-        prev = v;
         vcpu_arch_run(v);
     }
 }
