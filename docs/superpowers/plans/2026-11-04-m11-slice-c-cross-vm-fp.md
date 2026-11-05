@@ -17,6 +17,26 @@
 > 入口不需要；PAC 降级为 TID3 特性屏蔽（HCR.APK/API=0 本就陷入密钥访问，风险是 guest 崩在
 > EC 0x09，不是密钥泄漏）；vuart TX 按行缓冲不进 C，列为片 D 前置项。
 
+## 2026-11-05 回归收尾状态（覆盖下方原任务模板的状态）
+
+原 T1–T7 实现已按用户指示提前合入，原测试专家未通过、关卡②未执行。本轮在
+`feature/m11-c-survivor-fix` 修复，不把下方历史 gate 的未执行记录改写为通过。
+详见 [修复 devlog](../../devlog/2026-11-05-m11-c-regression-fix.md) 和
+[报告](../../reports/2026-11-05-m11-c-regression-fix.md)。
+
+- [x] 校准 xvm2 采样与 Linux marker/NO_HZ 判据；active-IPI 检测 RED→GREEN→回退 RED。
+- [x] 补 AP0/AP1 上下文，关闭原 Task 8 的 AP known gap；补 active IRQ round-trip 检测。
+- [x] 修复 LOAD 失败后的 stale prev，host 确定性测试及 Linux IABT 现场对应。
+- [x] CAS 状态转换与原子 OFF 旧状态驱动 stop-kick；50 万轮 host 竞争通过。
+- [x] 启动挂死定位：14 次中 1 次，跨 VM 同步等待占住彼此所需 pCPU；实际 QEMU 不陷入 WFE。
+      当前范围仅定位，不实施 D；保留非 gate `wfe_wait` 诊断。公平性处理进入既定 D 设计输入，
+      无条件 kick 轮转方案被否决，目标关联的新通知协议须另批。
+- [x] 更新布局 pins/构建依赖；`make test` 10 场景与 host-test 通过。
+- [ ] 最终干净树连续 3 次 Linux gate，更新报告。
+- [ ] Linear H-27 同步（当前会话无可用集成/授权）。
+
+正式测试专家复验、架构师关卡②和合入集成分支**不在本轮**；片 D 未开工。
+
 ## Global Constraints
 
 - **EL2 C 代码仍 `-mgeneral-regs-only`**：FP/SIMD 指令只能出现在新 `.S` 文件里。
@@ -145,7 +165,7 @@
 ### Task 8: ADR-0020 + 收尾
 
 - [ ] ADR-0020《FP/SIMD 急切保存先于惰性》：每次换下/阻塞存 528 B，换入恢复；否决惰性 `CPTR_EL2.TFP` 陷阱法（触发条件 = RK3588 实测切换开销）；含 Mermaid。
-- [ ] ADR-0019 修订汇总：Task 1/1b/2/4/6 的订正；新增已知缺口（各带触发条件）——`ICH_AP1R0_EL2` 未保存（触发：片 D 抢占，A2）；PPI 27 物理屏蔽是 per-pCPU 状态被共享 vCPU 共用（A3 余项）；EL1 物理定时器 `CNTP_*` 未保存且 `CNTHCTL.EL1PCEN=1`（触发：首个使用 CNTP 的 guest，A4）；RK3588 A76/A55 推测性 AT 勘误（1165522/1530923，触发：RK3588 bring-up，A6）；AMAIR/AFSR0/1/CSSELR 未保存（A8）；pCPU0 永久让出轮转的负载形态（A1）。
+- [ ] ADR-0019 修订汇总：Task 1/1b/2/4/6 的订正；新增已知缺口（各带触发条件）——~~`ICH_AP1R0_EL2` 未保存（触发：片 D 抢占，A2）~~（11-05 已补 AP0/AP1；原触发判断被 SYSTEM_OFF stop IPI 证伪）；PPI 27 物理屏蔽是 per-pCPU 状态被共享 vCPU 共用（A3 余项）；EL1 物理定时器 `CNTP_*` 未保存且 `CNTHCTL.EL1PCEN=1`（触发：首个使用 CNTP 的 guest，A4）；RK3588 A76/A55 推测性 AT 勘误（1165522/1530923，触发：RK3588 bring-up，A6）；AMAIR/AFSR0/1/CSSELR 未保存（A8）；pCPU0 永久让出轮转的负载形态（A1）。
 - [ ] 里程碑骨架片 C 勾选；本 plan 状态行；devlog + 日报；Linear H-27 追加。
 
 ---
