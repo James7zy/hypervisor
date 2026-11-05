@@ -20,9 +20,10 @@
  *         yet (the SGIs come at +500 and would also wake it — so VM0 v0
  *         checks it resumed BEFORE +500), takes its own expired timer,
  *         and yields straight back.
- *   +500  VM0 v1 (pCPU1) sends SGI 5 and 6 to VM0 v0 while VM1 v1 is
+ *   +500  VM0 v1 (pCPU1) sends SGI 5, 6, 7 to VM0 v0 while VM1 v1 is
  *         current on pCPU0: VM1 v1 must take none (T2, per-vCPU pending).
- *   +700  VM1 v1 yields; VM0 v0 resumes with both SGIs (LR2+LR3). 8
+ *   +700  VM1 v1 yields; VM0 v0 resumes: 5/6 in LR2/LR3, 7 via the EOI
+ *         maintenance refill. 8
  *         rotation rounds; each side's EL1, FP and the same-IPA memory
  *         word must be its own.
  *   tail  VM1 v1 busy-loops forever; VM1 v0 SYSTEM_OFFs VM1 -> the kick
@@ -52,7 +53,7 @@
 
 static volatile unsigned long t_start;     /* this VM's time origin */
 static volatile unsigned long shared_word; /* SAME IPA in both VMs */
-static volatile int fired, sgi5, sgi6, sgi_other;
+static volatile int fired, sgi5, sgi6, sgi7, sgi_other;
 static volatile int v1_final;              /* VM1: v1 reached its tail */
 
 static volatile unsigned char v1_stack[0x4000] __attribute__((aligned(16), used));
@@ -95,6 +96,8 @@ void svm_irq_handler(void)
         sgi5++;
     } else if (intid == 6U) {
         sgi6++;
+    } else if (intid == 7U) {
+        sgi7++;
     } else if (intid < 16U) {
         sgi_other++;
     }
@@ -161,6 +164,9 @@ static void secondary_main(void)
     busy_until(t_start + ms(500));
     __asm__ volatile("msr ICC_SGI1R_EL1, %0" :: "r"((5UL << 24) | 1UL));
     __asm__ volatile("msr ICC_SGI1R_EL1, %0" :: "r"((6UL << 24) | 1UL));
+    /* Third SGI: only two SGI LRs (LR2/LR3), so 7 is a leftover at the
+     * resume drain — delivered only via the EOI maintenance refill (T2). */
+    __asm__ volatile("msr ICC_SGI1R_EL1, %0" :: "r"((7UL << 24) | 1UL));
     __asm__ volatile("isb");
     for (;;)
         __asm__ volatile("wfi");             /* alone on pCPU1: sleeps */
@@ -190,13 +196,13 @@ void SVM_ENTRY _start(void)
     unsigned long t_wake = now();
     unsigned long ctl;
     __asm__ volatile("mrs %0, CNTV_CTL_EL0" : "=r"(ctl));
-    while (!(sgi5 && sgi6))
+    while (!(sgi5 && sgi6 && sgi7))
         __asm__ volatile("wfi");             /* first one yields to VM1 v1 */
     check(fired == 1 && ctl == 0UL && t_wake >= t_start + ms(300) &&
           t_wake < t_start + ms(500),
           "XVM0: own timer woke it via the bg timer, before the SGIs\n");
-    check(sgi5 == 1 && sgi6 == 1 && sgi_other == 0,
-          "XVM0: SGI 5 and 6 received\n");
+    check(sgi5 == 1 && sgi6 == 1 && sgi7 == 1 && sgi_other == 0,
+          "XVM0: SGI 5, 6 and 7 received (EOI refill)\n");
 
     /* Round 8 does not return until VM1 v1 stops running: it busy-loops
      * forever after its own round 8, so only the SYSTEM_OFF kick unwind
@@ -233,7 +239,7 @@ static void secondary_main(void)
     busy_until(t_start + ms(400));           /* VM0's deadline passes now */
     __asm__ volatile("wfi");                 /* yield: VM0 v0 queued only by CNTHP */
     busy_until(t_start + ms(700));           /* SGIs for VM0 v0 land now */
-    check(sgi5 + sgi6 + sgi_other == 0, "XVM1: no SGI leaked from VM0\n");
+    check(sgi5 + sgi6 + sgi7 + sgi_other == 0, "XVM1: no SGI leaked from VM0\n");
 
     for (int i = 0; i < ROUNDS; i++)
         __asm__ volatile("wfi");             /* rotate with VM0 v0 */

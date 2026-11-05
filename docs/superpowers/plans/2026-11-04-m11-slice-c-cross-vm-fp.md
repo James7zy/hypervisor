@@ -69,7 +69,7 @@
 - Modify: `hypervisor/arch/arm64/include/arch/vm.h`（`vcpu_arch` 尾部 `u16 sgi_pending;` + 偏移重钉）
 - Modify: `hypervisor/arch/arm64/vgic/vgic_sgi.c`
   - 删 `sgi_pending[NR_CPUS]`；`vgic_sgi_trap` 在 `sgi_lock` 下把位写进**目标 vCPU**：目标即发送者 → 立即 drain；目标在别的 pCPU 上运行 → kick 其亲和 pCPU；目标 BLOCKED → `sched_wake`；目标在队列中 RUNNABLE → 只记位，resume 时 drain。
-  - `vgic_sgi_drain_vcpu(struct vcpu *v)`：只注入能放进**空闲** LR 的位（LR2、LR3 中 state 位 [63:62] 为 0 者），**只清已注入的位**，其余留在 `arch.sgi_pending`；仍有剩余时置 `ICH_HCR_EL2.NPIE`，由维护中断（INTID 25）在 LR 空出时重试，位图清空后清 NPIE。kick 分支的 `vgic_sgi_drain(cpu)` 改为对 `current_vcpu()` 调用它。
+  - `vgic_sgi_drain_vcpu(struct vcpu *v)`：只注入能放进**空闲** LR 的位（LR2、LR3 中 state 位 [63:62] 为 0 者），**只清已注入的位**，其余留在 `arch.sgi_pending`；仍有剩余时~~置 `ICH_HCR_EL2.NPIE`~~ **（实现偏离，2026-11-04：改为占用槽置 LR EOI 位——NPIE 在两槽皆 active-only 时电平持续而无可注入；见 ADR-0019）**，由维护中断（INTID 25）在 LR 空出时重试。kick 分支的 `vgic_sgi_drain(cpu)` 改为对 `current_vcpu()` 调用它。
 - Modify: `hypervisor/arch/arm64/vgic/vgic.c`（`vgic_inject_sgi` 取目标 LR 参数，不再固定覆盖 LR2；`vgic_init` 清 `sgi_pending`）
 - Modify: `hypervisor/arch/arm64/irq/irq_handler.c`（维护中断分支：INTID 25 → `vgic_sgi_drain_vcpu(current_vcpu())`，完全 deactivate；GIC 侧使能 PPI 25，与 PPI 27 同处）
 - Modify: `hypervisor/arch/arm64/guest/vm.c`（resume/load 在 `vgic_restore` 之后 drain；自重拾路径也 drain——关卡① A5）

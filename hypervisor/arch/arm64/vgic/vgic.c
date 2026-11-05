@@ -9,6 +9,7 @@
 #include <vgic.h>
 #include <gic_v3.h>
 #include <arch/sysreg.h>
+#include <board.h>
 
 /* Pre-entry only: IMSC starts zero and only the target guest can enable it
  * after its sole restore. Early RX cannot publish LR1. Never reset spi_lock. */
@@ -52,6 +53,7 @@ void vgic_init(struct vcpu *vcpu)
     /* Fresh context: SGIs sent to the dead one are dropped (a racing
      * sender's bit may be lost — same as an SGI to a powered-off PE). */
     vcpu->arch.sgi_pending = 0;
+    vcpu->arch.timer_ppi_active = false;   /* restore clears a dead owner's */
 }
 
 void vgic_inject_sw(struct vcpu *vcpu, u32 vintid, u8 prio)
@@ -202,6 +204,8 @@ void vgic_restore(struct vcpu *vcpu)
     SYSREG_WRITE(ICH_HCR_EL2,  vcpu->arch.ich_hcr_el2);
     SYSREG_WRITE(ICH_VMCR_EL2, vcpu->arch.ich_vmcr_el2);
     SYSREG_WRITE(ICH_LR0_EL2,  vcpu->arch.ich_lr[0]);
+    gic_ppi_set_active(current_vcpu_id(), BOARD_VTIMER_IRQ,
+                       vcpu->arch.timer_ppi_active);
     /* LR1 under spi_lock, and the publisher flag cleared there (M11 C):
      * once the shadow is in the live register, the live register is the
      * authority. A flag left set made the NEXT put keep a stale shadow
@@ -233,6 +237,8 @@ void vgic_save(struct vcpu *vcpu)
     vcpu->arch.ich_hcr_el2  = SYSREG_READ(ICH_HCR_EL2);
     vcpu->arch.ich_vmcr_el2 = SYSREG_READ(ICH_VMCR_EL2);
     vcpu->arch.ich_lr[0] = SYSREG_READ(ICH_LR0_EL2);
+    vcpu->arch.timer_ppi_active =
+        gic_ppi_get_active(current_vcpu_id(), BOARD_VTIMER_IRQ);
     vcpu->arch.ich_lr[2] = SYSREG_READ(ICH_LR2_EL2);
     vcpu->arch.ich_lr[3] = SYSREG_READ(ICH_LR3_EL2);
 
