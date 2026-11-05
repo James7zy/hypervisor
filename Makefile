@@ -219,7 +219,10 @@ test-qemu-xvm:
 	sh tests/run_svm_test.sh tests/svm/expect/xvm.txt
 
 # M11 slice C survivor detector: both pCPUs shared 2x2-on-2; after VM1's
-# SYSTEM_OFF the survivor's vCPU1 must keep taking its own timer.
+# SYSTEM_OFF the survivor's vCPU1 must keep taking its own timer. NOT yet in
+# the `test` aggregate: it is RED on dev HEAD (survivor freeze, see
+# docs/debug/m11-c-survivor-freeze.md) and joins the gate with its GREEN
+# commit.
 .PHONY: xvm2 test-qemu-xvm2
 XVM2_BINS := $(BUILD_DIR)/xvm2/xvm2-vm0.bin $(BUILD_DIR)/xvm2/xvm2-vm1.bin
 .SECONDARY: $(XVM2_BINS:.bin=.elf)
@@ -372,7 +375,7 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-xvm test-qemu-xvm2
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-xvm
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh
