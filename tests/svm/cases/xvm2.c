@@ -14,20 +14,22 @@
  *         (it must be RUNNING when it SYSTEM_OFFs at +700).
  *   +0    VM0 v1 (pCPU1): arms CNTV for +900 (the same deadline as v0 —
  *         while off-CPU only the EL2 background timer covers it), wfi.
- *         VM1 v1 (pCPU1): busy-waits to +700, then yields forever.
+ *         VM1 v1 (pCPU1): enables IRQs; v0 sends SGI 2, whose handler
+ *         stays in WFE without EOI (Linux CPU-stop IPI behaviour).
  *   +700  VM1 v0: SYSTEM_OFF -> both VM1 vCPUs swept to OFF; VM1 v1 is
- *         RUNNING on pCPU1, so it is kicked and unwinds (T6).
+ *         RUNNING inside its IRQ on pCPU1, so it is kicked and unwinds.
+ *         Its active priority must not leak into the survivor.
  *   +900  VM0 v0's timer fires (its own CNTV, or the EL2 background timer
  *         while it was off-CPU). It samples vCPU1's tick counter, waits on
- *         its own timer to +1500, samples again. vCPU1 starts its 100 ms
- *         tick loop from the +900 wake, so the window under test is
+ *         five 250 ms windows with its own timer. vCPU1 starts its 100 ms
+ *         tick loop from the +900 wake, so the windows under test are
  *         entirely after the sweep.
- *   +1500 verdict: vCPU1 — sharing pCPU1 with the killed VM until now —
+ *   verdict: vCPU1 — sharing pCPU1 with the killed VM until now —
  *         must have been woken by its own timer at least once after the
  *         sweep. A survivor left stranded on pCPU1 (lost wake / bad
  *         cross-VM resume) shows up as a frozen counter.
  *
- * Run: make test-qemu-xvm2   (in the `test` aggregate)
+ * Run: make test-qemu-xvm2   (standalone until regression is validated)
  */
 #include "../svm_lib.h"
 
@@ -41,6 +43,10 @@
 static volatile unsigned long t_start;   /* this VM's time origin */
 static volatile unsigned long v1_ticks;  /* VM0: bumped by ITS vCPU1 */
 static volatile int timer0;              /* VM0 v0: own vtimer fired */
+#if XVM_ID == 1
+static volatile int secondary_ready;
+static volatile int secondary_stopping;
+#endif
 static volatile unsigned char v1_stack[0x4000] __attribute__((aligned(16), used));
 
 static unsigned long now(void)
@@ -65,7 +71,11 @@ static void busy_until(unsigned long t)
 
 static void check(int cond, const char *what)
 {
-    svm_puts(cond ? what : "XVM2: CHECK FAILED\n");
+    if (!cond) {
+        svm_puts("XVM2: CHECK FAILED\n");
+        svm_done(1);
+    }
+    svm_puts(what);
 }
 
 static unsigned long my_aff0(void)
@@ -75,13 +85,22 @@ static unsigned long my_aff0(void)
     return m & 0xFFUL;
 }
 
-/* The only virtual IRQ any vCPU here takes is its own vtimer PPI 27. */
+/* VM0 takes vtimer PPI 27; VM1 takes a Linux-like CPU-stop SGI 2. */
 void svm_irq_handler(void)
 {
     unsigned long iar, intid;
 
     __asm__ volatile("mrs %0, ICC_IAR1_EL1" : "=r"(iar));
     intid = iar & 0xFFFFFFUL;
+#if XVM_ID == 1
+    if (intid == 2U) {
+        /* Linux's stop IPI never EOIs: the vCPU is killed inside its IRQ.
+         * WFE does not yield, so SYSTEM_OFF must kick this RUNNING vCPU. */
+        secondary_stopping = 1;
+        for (;;)
+            __asm__ volatile("wfe");
+    }
+#endif
     if (intid == 27U) {
         /* Mask the virtual timer at once: the level PPI re-raises until the
          * guest deactivates, and this case takes the IRQ on BOTH vCPUs. */
@@ -146,15 +165,18 @@ void SVM_ENTRY _start(void)
 
     /* Detector (M11 C): vCPU1 shares pCPU1 with the VM that was just
      * killed. Once stranded it stays stranded, so require progress in FIVE
-     * consecutive 100 ms windows rather than one sample — a single lost
-     * wake must not be able to pass. */
+     * consecutive 250 ms windows rather than one sample. Each window spans
+     * more than two secondary ticks, allowing for scheduling jitter. */
     unsigned long last = v1_ticks;
     int stalled = 0;
     for (int w = 0; w < 5; w++) {
-        __asm__ volatile("msr CNTV_CVAL_EL0, %0" :: "r"(now() + ms(100)));
+        int before = timer0;
+        unsigned long deadline = now() + ms(250);
+        __asm__ volatile("msr CNTV_CVAL_EL0, %0" :: "r"(deadline));
         __asm__ volatile("msr CNTV_CTL_EL0, %0\n\tisb" :: "r"(1UL));
-        while (!timer0)
+        while (timer0 == before)
             __asm__ volatile("wfi");
+        check(now() >= deadline, "XVM2: sample window elapsed\n");
         if (v1_ticks == last)
             stalled++;
         last = v1_ticks;
@@ -178,6 +200,13 @@ void SVM_ENTRY _start(void)
                                (unsigned long)xvm2_secondary_entry, 0UL);
     check(r == 0, "XVM2: VM1 CPU_ON(vCPU1) == SUCCESS\n");
 
+    while (!secondary_ready && now() < t_start + ms(600))
+        ;
+    check(secondary_ready, "XVM2: VM1 secondary ready\n");
+    __asm__ volatile("msr ICC_SGI1R_EL1, %0" :: "r"((2UL << 24) | 2UL));
+    while (!secondary_stopping && now() < t_start + ms(700))
+        ;
+    check(secondary_stopping, "XVM2: VM1 secondary stopped inside IRQ\n");
     busy_until(t_start + ms(700));           /* RUNNING at the sweep */
     svm_puts("XVM2: VM1 powering off\n");
     (void)svm_hvc(PSCI_SYSTEM_OFF, 0UL);
@@ -185,10 +214,12 @@ void SVM_ENTRY _start(void)
         __asm__ volatile("wfi");
 }
 
-/* VM1 vCPU1 (pCPU1, shares with VM0 vCPU1): busy until the sweep kicks it. */
+/* VM1 vCPU1 leaves an active priority on pCPU1 when SYSTEM_OFF kills it. */
 static void secondary_main(void)
 {
-    busy_until(t_start + ms(700));
+    svm_gic_el1_init();
+    __asm__ volatile("msr daifclr, #2" ::: "memory");
+    secondary_ready = 1;
     for (;;)
         __asm__ volatile("wfi");
 }
