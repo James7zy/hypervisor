@@ -22,6 +22,7 @@
 #define ROUNDS 8
 
 static volatile unsigned long turn;      /* round counter shared by both */
+static volatile int secondary_ready;
 /* ---- vtimer segment (M11 B2 T3, D4) ---------------------------------- */
 /* R5 CNTV/vGIC bans LIFT for this segment (per the B2 plan): the
  * publisher-wins merge is pending (T5); interim safety = all publishers
@@ -97,6 +98,7 @@ static volatile int v1_final;
 static void vcpu1_main(void) __attribute__((used));
 static void vcpu1_main(void)
 {
+    secondary_ready = 1;
     for (;;) {
         if (turn >= ROUNDS) {
             /* GPR rounds over: stamp MY (different) EL1 values first — the
@@ -196,6 +198,12 @@ void SVM_ENTRY _start(void)
     unsigned long r = svm_hvc4(PSCI_CPU_ON_64, 1UL,
                                (unsigned long)ctxsw_secondary_entry, 0UL);
     check(r == 0, "CTXSW: CPU_ON(vCPU1) == SUCCESS\n");
+
+    /* A queued peer must run even when the caller waits with WFE, as
+     * Linux does in synchronous IPI/stop-machine rendezvous. */
+    while (!secondary_ready)
+        __asm__ volatile("wfe");
+    svm_puts("CTXSW: WFE let queued secondary run\n");
 
     while (turn < ROUNDS) {
         /* Round-indexed markers: the expect file pins r0..r7, so a
