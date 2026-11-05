@@ -29,7 +29,7 @@
  *         sweep. A survivor left stranded on pCPU1 (lost wake / bad
  *         cross-VM resume) shows up as a frozen counter.
  *
- * Run: make test-qemu-xvm2   (standalone until regression is validated)
+ * Run: make test-qemu-xvm2   (included in the `test` aggregate)
  */
 #include "../svm_lib.h"
 

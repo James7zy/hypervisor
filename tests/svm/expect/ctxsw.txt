@@ -3,7 +3,6 @@ SVM: launching VMID=
 [hv] PSCI: CPU_ON vCPU1 -> ON_PENDING (pCPU0)
 CTXSW: stamps written (x19-x28)
 CTXSW: CPU_ON(vCPU1) == SUCCESS
-CTXSW: WFE let queued secondary run
 CTXSW: v1
 CTXSW: r0
 CTXSW: r1
@@ -20,6 +19,7 @@ CTXSW: t0 timer fired
 CTXSW: t1 timer is MY disarmed one
 CTXSW: t1 timer fired
 CTXSW: both timers fired in their owners
+CTXSW: active IRQ priorities survived switch
 SVM HVC: done (x1=0x0)
 CTXSW: v0 tpidr/ro/contextidr stamps intact
 CTXSW: v0 ttbr0/mair/cpacr stamps intact

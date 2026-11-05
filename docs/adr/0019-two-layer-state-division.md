@@ -34,6 +34,16 @@ M11 的上下文切换需要回答"哪些状态在异常入口保存、哪些在
    （B2 实现三分后并存，非吸收）。
 7. **ADR-0018 待决二落定**：spec §4"`switch_to` 唯一公开入口"措辞**宣布被
    put/load/resume 三元组取代**——无 switch_to 符号存在，调度即 `sched_loop` 循环。
+8. **片 C 回归修订（2026-11-05）：AP 是 vCPU 上下文**。保存/恢复 AP0/AP1 全部已实现项，
+   数量按 `ICH_VTR_EL2.PreBits=5/6/7` 取每组 1/2/4 项，fresh load 清零 shadow。
+   SYSTEM_OFF 可在 guest 的 stop IPI handler 内换下，因此“协作调度的 AP 必为空”不成立。
+   不改 ADR-0001 HW=1 链接，不把 LR0 shadow 的 pending 合并回已完成的 live LR。
+9. **resident 与运行资格分离**。switch-in 完成后，`prev` 必须立即反映硬件实际归属，
+   再检查 LOAD 是否成功；远端 sweep 可让 LOAD 失败，但不能把旧 resident 留在 `prev`。
+10. **状态转换线性化**。PICK/LOAD/BLOCK/WAKE/YIELD/CPU_ON 用 acquire-release CAS；
+    OFF 用 exchange。sweep 按 exchange 返回的真实旧状态决定是否 kick，不能另采样
+    `was_running`。这是既有异步 stop 的闭合，不新增停机 ack，也不承诺 OFF 发布瞬间
+    已执行完最后一条 guest 指令。证据见 [回归修复 devlog](../devlog/2026-11-05-m11-c-regression-fix.md)。
 
 ```mermaid
 flowchart TB
@@ -42,7 +52,7 @@ flowchart TB
     end
     subgraph PUT["put / block（每换下/阻塞，C）"]
         EL1["EL1 12 项"]
-        VGIC["vGIC 影子（LR1 publisher-wins 合并）"]
+        VGIC["vGIC LR + AP0/AP1（LR1 publisher-wins 合并）"]
         CNTV["CNTV 影子（put:IMASK / block:LIVE）"]
     end
     subgraph RES["resume（每重入，C）"]
@@ -100,9 +110,18 @@ flowchart TB
   `ctl=IMASK, cval=0`，同时整块清零 EL1 集与 FP 文件（ADR-0020）。
 - ~~1:1 profile 下 put/resume/EL1 路径从不执行~~（**片 C T7**）：Linux 演示拓扑已翻到
   2×2-on-2，切换路径在真实负载下执行；跨 VM 覆盖面另有 xvm 场景（T5）。
+- **共享 pCPU 的协作等待饥饿（2026-11-05 已定位，未修复）**：旧 HV focused boot probe
+  14 次中 1 次出现 VM0 stop-machine 与 VM1 同步 IPI 等待环；各自所需的对端在另一
+  pCPU 队列中。QEMU 9.2.4 不产生 WFE configurable trap（实际 trace 的 WFx=0），
+  因此不能靠 TWE 解除等待。无条件 kick 轮转也被架构诊断否决：可能换下刚收到 IPI
+  的 current，消费唯一通知后形成另一个等待环。本轮用户范围是定位启动问题、不进入 D：
+  保留 `wfe_wait` 非 gate 诊断；处理归既定片 D 的抢占/公平性设计，进入 D 时必须以此
+  rendezvous 回归作为验收输入。**当前仍不能保证任意 Linux 启动都成功**，不得用有限
+  次绿色宣称此缺口消失。目标关联的通知调度若提前实施，须另行明确批准协议。
 - **片 C 新增已知缺口**（2026-11-04，各带触发条件）：
-  - `ICH_AP1R0_EL2`（活动优先级）未保存：协作切换只在 guest `wfi` 处发生，此时 guest 不在
-    中断服务中，AP 寄存器为空。触发 = 片 D 抢占（可在中断服务中途换下）。
+  - ~~`ICH_AP1R0_EL2` 未保存、仅片 D 触发~~：2026-11-05 已修 AP0/AP1 完整上下文。
+    原假设被 SYSTEM_OFF 在 stop IPI 内换下的现场与 xvm2 受控红证伪。
+    验证边界：QEMU 仅覆盖 5 位 PreBits；首个 6/7 位实现或 RK3588 bring-up 时须实跑额外项。
   - PPI 27 物理屏蔽（`gic_ppi_set_enable`，secondary 早期 VENG1=0 回退路径）是 per-pCPU 状态，
     共享 pCPU 的两个 vCPU 共用。触发 = 首个观察到一个 vCPU 的屏蔽饿死另一个 vCPU timer 的场景。
   - EL1 物理定时器 `CNTP_*` 未保存，且 `CNTHCTL.EL1PCEN=1` 放行 guest 直接访问。触发 = 首个使用
