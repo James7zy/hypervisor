@@ -19,6 +19,7 @@
 #include <vgic.h>
 #include <gic_v3.h>
 #include <console.h>
+#include <vtimer.h>
 #include "vgic_debug.h"
 #include "vgic_sgi.h"
 
@@ -129,6 +130,13 @@ void el2_irq_handler(void)
         struct vcpu *cv = current_vcpu();
         if (cv != NULL)
             vgic_sgi_drain_vcpu(cv);
+        gic_priority_drop(intid);
+        gic_deactivate(intid);
+    } else if (intid == BOARD_HYP_TIMER_IRQ) {
+        /* EL2 background timer (M11 C T4): level-triggered on CNTHP, so
+         * re-program (or stop) it BEFORE drop+deactivate, or it re-fires at
+         * once. Never HW-forwarded: no guest owns this timer. */
+        vtimer_bg_expire();
         gic_priority_drop(intid);
         gic_deactivate(intid);
     } else if (intid == BOARD_PL011_IRQ) {
