@@ -10,6 +10,7 @@
 #include <arch/sysreg.h>
 #include "../mmu/stage2.h"
 #include "fp.h"
+#include <vtimer.h>
 #include <vgic.h>
 #include <vgic_v3_mmio.h>
 #include <vgic_sgi.h>
@@ -122,6 +123,7 @@ void vcpu_arch_load(struct vcpu *v)
 
     vgic_restore(v);
     vgic_sgi_drain_vcpu(v);   /* SGIs sent while off-CPU (M11 C T2) */
+    vtimer_bg_arm();          /* an off-CPU sleeper may have just appeared (T4) */
 }
 
 
@@ -193,11 +195,10 @@ void vcpu_arch_put(struct vcpu *v)
 /* Block-site save (M11 B2, gate-1 R1/R2): same shadows as put, but the
  * physical timer stays LIVE (armed/unmasked as the guest left it) — it is
  * the blocked vCPU's own wake source: the PPI fires at EL2, inject_hw
- * targets cur_vcpu == this blocked owner, sched_wake requeues. Known gap
- * (ponytail:): if this pCPU later runs ANOTHER vCPU, the pending PPI
- * injects into cur_vcpu = the wrong vCPU — trigger for the EL2 background
- * timer redesign is the first shared-pCPU scenario relying on its own
- * timer. */
+ * targets cur_vcpu == this blocked owner, sched_wake requeues. Once this
+ * pCPU switches ANOTHER vCPU in, the live CNTV is the newcomer's; the
+ * sleeper's deadline is then covered by the EL2 background timer
+ * (vtimer_bg_arm at resume/load, M11 C T4). */
 void vcpu_arch_block(struct vcpu *v)
 {
     vgic_save(v);
@@ -240,6 +241,7 @@ void vcpu_arch_resume(struct vcpu *v)
     __asm__ volatile("isb");
     vgic_restore(v);
     vgic_sgi_drain_vcpu(v);   /* SGIs sent while off-CPU (M11 C T2) */
+    vtimer_bg_arm();          /* an off-CPU sleeper may have just appeared (T4) */
 }
 
 void vcpu_arch_inject_irq(struct vcpu *v, u32 irq)

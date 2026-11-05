@@ -67,14 +67,17 @@ void gic_init(void)
         mmio_write32(sgi + GICR_ISENABLER0, (1U << kick));
     }
 
-    /* 3a'. vGIC maintenance PPI (M11 C T2: SGI LR-slot refill on EOI).
-     *      secondary_main enables it on its own GICR. */
+    /* 3a'. vGIC maintenance PPI (M11 C T2: SGI LR-slot refill on EOI) and
+     *      the EL2 background timer PPI (M11 C T4). secondary_main enables
+     *      both on its own GICR. */
     {
         const u32 maint = BOARD_VGIC_MAINT_IRQ;
+        const u32 hyp   = BOARD_HYP_TIMER_IRQ;
         mmio_write32(sgi + GICR_IGROUPR0,
-                     mmio_read32(sgi + GICR_IGROUPR0) | (1U << maint));
+                     mmio_read32(sgi + GICR_IGROUPR0) | (1U << maint) | (1U << hyp));
         mmio_write8(sgi + GICR_IPRIORITYR + maint, 0xA0);
-        mmio_write32(sgi + GICR_ISENABLER0, (1U << maint));
+        mmio_write8(sgi + GICR_IPRIORITYR + hyp, 0xA0);
+        mmio_write32(sgi + GICR_ISENABLER0, (1U << maint) | (1U << hyp));
     }
 
     /* 3b. PL011 UART SPI (INTID 33) in the distributor: Group 1 NS, priority

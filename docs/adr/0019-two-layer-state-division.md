@@ -67,9 +67,12 @@ flowchart TB
 - **已知缺口三件**（触发条件各钉）：AMAIR_EL1（首个消费者）；PAC 密钥 APIA/APIB/APGA
   （**片 C 共享 Linux 前必须补**——Linux 用 PAuth）；CNTKCTL_EL1（随 EL2 背景定时器
   重设计合并处理）。
-- **共享 pCPU 自 timer 唤醒缺口**：阻塞 vCPU 的 pCPU 后来跑了他者时，其 PPI 误投
-  cur_vcpu——EL2 背景定时器（KVM/bao 式 deadline 模拟）的触发条件 = 首个依赖自身
-  timer 的共享阻塞场景。
+- ~~**共享 pCPU 自 timer 唤醒缺口**~~（**片 C T4 修复**）：阻塞 vCPU 的 pCPU 后来跑了
+  他者时，其 PPI 误投 cur_vcpu。现由 EL2 背景定时器覆盖：每 pCPU 一个 CNTHP（PPI 26），
+  在 resume/load 末尾编程为"亲和本核、BLOCKED、非当前"vCPU 中 `ENABLE=1 && IMASK=0`
+  者的最早物理期限 `cntv_cval + cntvoff`；到期 `sched_wake`，resume 恢复其已过期的
+  CNTV 使 PPI 27 重新触发。选型：单 CNTHP 取最早期限（v8.0 无 CNTHV）；片 D 抢占 tick
+  复用同一定时器，取 min(tick, 最早期限)。不新增通用层钩子。
 - ~~**共享 profile 跨 vCPU SGI 缺口**~~（**片 C T2 修复**）：`sgi_pending[]` 按 pCPU
   键控，共享时误投当前 vCPU。原记"片 C 的 2×2-on-2 每 VM 仍 1:1，不受影响"为**误判**：
   键是 pCPU 而非 (VM, vCPU)，跨 VM 共享一个 pCPU 时发给 VM1 vCPU0 的 SGI 会注入当时在跑

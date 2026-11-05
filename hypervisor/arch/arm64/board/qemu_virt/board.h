@@ -16,6 +16,7 @@
 #define BOARD_GIC_RDIST_BASE  0x080A0000UL   /* GICR CPU0 RD_base     */
 #define BOARD_VTIMER_IRQ      27U            /* EL1 virtual timer PPI */
 #define BOARD_VGIC_MAINT_IRQ  25U            /* GIC virtual-interface maintenance PPI */
+#define BOARD_HYP_TIMER_IRQ   26U            /* EL2 physical timer (CNTHP) PPI */
 #define BOARD_PL011_IRQ       33U            /* PL011 UART SPI (DTS interrupts=<0 1 4> → 32+1) */
 
 /* M3.5: cross-core "kick" SGI used to force a target pCPU into EL2 to drain
