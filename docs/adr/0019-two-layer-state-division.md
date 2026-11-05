@@ -64,9 +64,15 @@ flowchart TB
 
 ## Consequences
 
-- **已知缺口三件**（触发条件各钉）：AMAIR_EL1（首个消费者）；PAC 密钥 APIA/APIB/APGA
-  （**片 C 共享 Linux 前必须补**——Linux 用 PAuth）；CNTKCTL_EL1（随 EL2 背景定时器
-  重设计合并处理）。
+- **已知缺口三件**（触发条件各钉）：AMAIR_EL1（首个消费者）；PAC 密钥 APIA/APIB/APGA；
+  CNTKCTL_EL1。
+  - 片 C 修订（2026-11-04）：CNTKCTL_EL1 已随 T1b 进保存集。
+  - PAC 改为 **TID3 特性屏蔽**（T6）：ISAR1 APA/API/GPA/GPI 与 ISAR2 APA3/GPA3 读作 0，
+    guest 不会启用 PAuth，HINT 空间的 PAC 指令保持 NOP。
+  - 订正原理由："Linux 用 PAuth 故必须存密钥"不成立：HCR_EL2.APK/API=0 已把密钥访问陷到 EL2，
+    风险是 guest 崩在 EC 0x09，不是密钥泄漏；cortex-a72（v8.0）与 RK3588 的 A76/A55
+    均无 PAuth。
+  - 真正的密钥存取触发条件 = 首个要求 guest 使用 PAuth 的目标。
 - ~~**共享 pCPU 自 timer 唤醒缺口**~~（**片 C T4 修复**）：阻塞 vCPU 的 pCPU 后来跑了
   他者时，其 PPI 误投 cur_vcpu。现由 EL2 背景定时器覆盖：每 pCPU 一个 CNTHP（PPI 26），
   在 resume/load 末尾编程为"亲和本核、BLOCKED、非当前"vCPU 中 `ENABLE=1 && IMASK=0`

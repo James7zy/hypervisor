@@ -239,6 +239,15 @@ static void handle_sysreg_trap(struct arch_regs *regs, u64 esr)
                        (unsigned)crm, (unsigned)op2);
                 break;
             }
+            /* PAuth hidden (M11 C T6, gate-1 R8): no key save/restore, so
+             * the guest must never enable it. ISAR1 APA[7:4] API[11:8]
+             * GPA[27:24] GPI[31:28]; ISAR2 GPA3[11:8] APA3[15:12]. The PAC
+             * instructions in HINT space then stay NOPs. */
+            if (enc == ((6U << 4) | 1U))
+                v &= ~((0xFULL << 4) | (0xFULL << 8) | (0xFULL << 24) |
+                       (0xFULL << 28));
+            else if (enc == ((6U << 4) | 2U))
+                v &= ~((0xFULL << 8) | (0xFULL << 12));
             if (rt != 31U)
                 regs->x[rt] = v;
         }

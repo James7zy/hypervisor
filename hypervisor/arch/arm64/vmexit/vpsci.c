@@ -129,11 +129,12 @@ static void psci_system_off_vm(const char *what)
             if (pcpu == caller_pcpu)
                 continue;
             __asm__ volatile("dsb ish" ::: "memory");
-            cpu_arch_kick(pcpu);   /* in-guest sibling: parks in el2_irq_handler */
+            cpu_arch_kick(pcpu);   /* in-guest sibling: unwinds in el2_irq_handler */
         }
     }
 
-    hv_restore();   /* own pCPU unwinds; run loop sees OFF and idles forever */
+    hv_restore();   /* own pCPU unwinds; run loop sees OFF, picks the next
+                     * vCPU (another VM's on a shared pCPU) or idles */
 }
 
 /*
