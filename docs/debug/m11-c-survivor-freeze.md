@@ -126,6 +126,39 @@ LR0/CNTV，**吞掉已注入的虚拟中断** → 幸存者的定时器中断永
 要么是 ERET 之后 CPU 没把 pending 的 vIRQ 当成立即中断。下一步应打印 **ERET 之前的
 live LR0 + 该次 ERET 的 SPSR（PSTATE.I）**，一次运行(5 s)即可判定。
 
+## ERET 前现场（最后一组数据）
+
+在 `sched_loop` 的 `vcpu_arch_run(v)` 之前打印（SVM 侧，pCPU1，sweep 之后）：
+
+```
+[dbg] preeret p1 vm0 v1 LR0=70a0001b0000001b AP0=0 AP1=0 vmcr=ff4c000a spsr=345 elr=402002d4
+```
+
+- `LR0 = 0x70a0…`：**pending**、HW=1、vINTID 27 —— 虚拟中断确实挂在 LR 里；
+- `vmcr = 0xff4c000a`：VENG1 = 1（虚拟 Group-1 使能）、VPMR = 0xff（放行 0xA0）；
+- `AP0/AP1 = 0`：虚拟侧没有活动优先级（RPR 空闲），不存在「同优先级被 RPR 掩蔽」；
+- `spsr = 0x345`：EL1h、**I = 0（中断未屏蔽）**。
+
+即：**pending + 组使能 + 优先级放行 + PSTATE.I=0，但 CPU 在 eret 后就是不取这个虚拟中断。**
+同时 guest 侧统计（每次陷入都计入）显示整场只有 **2 次**中断进入（每 vCPU 各 1 次，
+最后一次 intid=1，是 SGI），此后**两个 pCPU 的幸存者都不再收到任何中断**。
+
+已排除：`ICC_EOIR1_EL1` / `ICC_IGRPEN1_EL1` 被 TC 陷阱丢弃（日志里没有任何
+`unhandled sysreg C12_C12_*`，QEMU 不 trap 它们）。
+
+## 待验证的最后一环（按可能性）
+
+1. **HW=1 LR 的 pending 位与物理线的联动**：注入后 guest 若重新武装 CNTV，物理电平落下，
+   硬件会自行清掉 pending——我们看到的 `save` 现场（live invalid / shadow pending）正是这一
+   形态。需要打印「eret 之后紧接的那条 ERET 的 SPSR + 第一条 guest 指令是否就是
+   `wfi` 之后的指令」，判断 guest 是否根本没被给到取中断的机会。
+2. **虚拟侧 ISENABLER(27) 状态漂移**：EL2 的 vGIC MMIO 模型与硬件虚拟接口对 PPI 27 的
+   enable/active 记账是否一致（guest 只 enable 一次，此后 EL2 若把该位当成 0，
+   HW=1 的 LR 可以 pending 但永不投递）。
+3. 用参考实现对照（`../xvisor` 的 `arch/arm64/vgic/vgic-v3.c` 与 bao 的 HW=1 LR 处理），
+   确认我们的「只 priority-drop、不 deactivate」与「每次物理 PPI 都重注入」这两条组合
+   是否本身就违反了 HW LR 的语义（ADR-0001 的假设需要重新审视）。
+
 ## 下一步（按优先级）
 
 1. **吃透 +0x80000**：给 guest 一个必然触发的 WFI（如刚起机的 early idle），打印陷阱
