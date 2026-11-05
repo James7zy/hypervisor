@@ -6,7 +6,7 @@ XVM1: fresh-load EL1 zero
 XVM1: fresh-load FP zero
 XVM1: no SGI leaked from VM0
 XVM0: own timer woke it via the bg timer, before the SGIs
-XVM0: SGI 5 and 6 received
+XVM0: SGI 5, 6 and 7 received (EOI refill)
 XVM1: isolation intact (EL1/FP/memory)
 [hv] PSCI: VM1 SYSTEM_OFF - stopping all vCPUs
 XVM0: isolation intact (EL1/FP/memory)

@@ -304,6 +304,11 @@ static void handle_sysreg_trap(struct arch_regs *regs, u64 esr)
             val = 0;   /* idle priority; good enough for the guest's checks */
         break;
     default:
+        /* ponytail: ICC_DIR_EL1 (C12_C11_1) lands here and is DROPPED: TC=1
+         * traps it on QEMU. Harmless while guests use EOImode=0 (Linux at
+         * EL1 and every SVM case: EOIR already deactivates). A guest with
+         * EOImode=1 would leave SGI LRs and the HW-linked PPI 27 Active
+         * forever — implement DIR (ICH_LR state update) before such a guest. */
         printk("[hv] EC=0x18 unhandled sysreg cpu%u C%u_C%u_%u %s\n",
                (unsigned)current_vcpu_id(), (unsigned)crn, (unsigned)crm,
                (unsigned)op2, wr ? "wr" : "rd");

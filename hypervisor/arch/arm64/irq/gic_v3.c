@@ -145,3 +145,22 @@ void gic_ppi_set_enable(u32 cpu, u32 intid, bool enable)
     mmio_write32(reg, (1U << (intid & 0x1FU)));
     asm volatile("dsb sy; isb");
 }
+
+static unsigned long gicr_sgi_frame(u32 cpu)
+{
+    return BOARD_GIC_RDIST_BASE + (unsigned long)cpu * 0x20000UL + GICR_SGI_OFFSET;
+}
+
+bool gic_ppi_get_active(u32 cpu, u32 intid)
+{
+    return (mmio_read32(gicr_sgi_frame(cpu) + 0x0300U /*ISACTIVER0*/) &
+            (1U << (intid & 0x1FU))) != 0U;
+}
+
+void gic_ppi_set_active(u32 cpu, u32 intid, bool active)
+{
+    mmio_write32(gicr_sgi_frame(cpu) + (active ? 0x0300U /*ISACTIVER0*/
+                                               : 0x0380U /*ICACTIVER0*/),
+                 (1U << (intid & 0x1FU)));
+    asm volatile("dsb sy; isb");
+}
