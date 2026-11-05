@@ -82,10 +82,14 @@ else ifeq ($(HV_GUEST),svm_ctxsw)
 # M11 slice A ctxsw detector: shared-affinity data (see vm_configs.c); only
 # make test-qemu-ctxsw builds this profile.
 CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=1 -DCONFIG_SVM_SHARED_PCPU=1
+else ifeq ($(HV_GUEST),svm_xvm)
+# M11 slice C cross-VM isolation: VM0 vCPU0 and VM1 vCPU1 share pCPU0 (see
+# vm_configs.c); only make test-qemu-xvm builds this profile.
+CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=2 -DCONFIG_SVM_XVM=1
 else ifeq ($(HV_GUEST),linux)
 CFLAGS += -DCONFIG_NR_VMS=2
 else
-$(error HV_GUEST must be 'linux', 'svm', 'svm_dual' or 'svm_ctxsw')
+$(error HV_GUEST must be 'linux', 'svm', 'svm_dual', 'svm_ctxsw' or 'svm_xvm')
 endif
 
 ASFLAGS := -g
@@ -144,7 +148,7 @@ $(OBJ_DIR)/%.o: hypervisor/%.S
 .SECONDARY: $(SVM_BINS:.bin=.elf)
 svm: $(SVM_BINS)
 
-$(BUILD_DIR)/svm/svm-%.elf: tests/svm/cases/%.c $(SVM_COMMON) tests/svm/svm_lib.h tests/svm/svm.lds
+$(BUILD_DIR)/svm/svm-%.elf: tests/svm/cases/%.c $(SVM_COMMON) tests/svm/svm_lib.h tests/svm/svm_fp.h tests/svm/svm.lds
 	@mkdir -p $(dir $@)
 	$(CC) $(SVM_CFLAGS) -Wl,--no-warn-rwx-segments -T tests/svm/svm.lds \
 	      -o $@ $< $(SVM_COMMON)
@@ -186,6 +190,29 @@ test-qemu-ctxsw:
 	LINUX_IMAGE= HYPERVISOR_ELF=$(CTXSW_BUILD_DIR)/hypervisor.elf \
 	SVM_BIN=$(CTXSW_BUILD_DIR)/svm/svm-ctxsw.bin \
 	sh tests/run_svm_test.sh tests/svm/expect/ctxsw.txt
+
+# M11 slice C cross-VM isolation on a shared pCPU: one source, one image per
+# VM (vspi precedent), FP-canary-safe flags.
+.PHONY: xvm test-qemu-xvm
+XVM_BINS := $(BUILD_DIR)/xvm/xvm-vm0.bin $(BUILD_DIR)/xvm/xvm-vm1.bin
+.SECONDARY: $(XVM_BINS:.bin=.elf)
+xvm: $(XVM_BINS)
+
+$(BUILD_DIR)/xvm/xvm-vm%.elf: tests/svm/cases/xvm.c $(SVM_COMMON) tests/svm/svm_lib.h tests/svm/svm_fp.h tests/svm/svm.lds
+	@mkdir -p $(dir $@)
+	$(CC) $(SVM_CFLAGS) -mgeneral-regs-only -DXVM_ID=$* \
+	      -Wl,--no-warn-rwx-segments -T tests/svm/svm.lds -o $@ $< $(SVM_COMMON)
+
+$(BUILD_DIR)/xvm/xvm-vm%.bin: $(BUILD_DIR)/xvm/xvm-vm%.elf
+	$(OBJCOPY) -O binary $< $@
+
+XVM_BUILD_DIR := build/test-xvm
+test-qemu-xvm:
+	$(MAKE) BUILD_DIR=$(XVM_BUILD_DIR) HV_GUEST=svm_xvm all xvm
+	LINUX_IMAGE= HYPERVISOR_ELF=$(XVM_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(XVM_BUILD_DIR)/xvm/xvm-vm0.bin \
+	SVM_BIN2=$(XVM_BUILD_DIR)/xvm/xvm-vm1.bin \
+	sh tests/run_svm_test.sh tests/svm/expect/xvm.txt
 
 DTC        ?= dtc
 GUEST_DTS  := guest/qemu_virt.dts
@@ -318,7 +345,7 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-xvm
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh
