@@ -321,9 +321,16 @@ $(BUILD_DIR)/host/sched_test: $(HOST_SCHED_SRCS) tests/host/host_test.h \
 	$(HOST_CC) $(HOST_TEST_CFLAGS) -Ihypervisor/arch/x86/include \
 	    -DCONFIG_NR_CPUS=1 -DCONFIG_NR_VMS=2 -o $@ $(HOST_SCHED_SRCS)
 
-host-test: $(BUILD_DIR)/host/host_test $(BUILD_DIR)/host/sched_test
+$(BUILD_DIR)/host/vcpu_state_race_test: tests/host/vcpu_state_race_test.c \
+    hypervisor/common/vm/vcpu_state.c hypervisor/include/vcpu_state.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(HOST_TEST_CFLAGS) -pthread -o $@ \
+	    tests/host/vcpu_state_race_test.c hypervisor/common/vm/vcpu_state.c
+
+host-test: $(BUILD_DIR)/host/host_test $(BUILD_DIR)/host/sched_test $(BUILD_DIR)/host/vcpu_state_race_test
 	$(BUILD_DIR)/host/host_test
 	$(BUILD_DIR)/host/sched_test
+	$(BUILD_DIR)/host/vcpu_state_race_test
 
 TEST_BUILD_DIR := build/test-svm
 
