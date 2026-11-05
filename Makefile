@@ -86,10 +86,14 @@ else ifeq ($(HV_GUEST),svm_xvm)
 # M11 slice C cross-VM isolation: VM0 vCPU0 and VM1 vCPU1 share pCPU0 (see
 # vm_configs.c); only make test-qemu-xvm builds this profile.
 CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=2 -DCONFIG_SVM_XVM=1
+else ifeq ($(HV_GUEST),svm_xvm2)
+# M11 slice C survivor detector: BOTH pCPUs shared 2x2-on-2 (see
+# vm_configs.c); only make test-qemu-xvm2 builds this profile.
+CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=2 -DCONFIG_SVM_XVM2=1
 else ifeq ($(HV_GUEST),linux)
 CFLAGS += -DCONFIG_NR_VMS=2
 else
-$(error HV_GUEST must be 'linux', 'svm', 'svm_dual', 'svm_ctxsw' or 'svm_xvm')
+$(error HV_GUEST must be 'linux', 'svm', 'svm_dual', 'svm_ctxsw', 'svm_xvm' or 'svm_xvm2')
 endif
 
 ASFLAGS := -g
@@ -213,6 +217,29 @@ test-qemu-xvm:
 	SVM_BIN=$(XVM_BUILD_DIR)/xvm/xvm-vm0.bin \
 	SVM_BIN2=$(XVM_BUILD_DIR)/xvm/xvm-vm1.bin \
 	sh tests/run_svm_test.sh tests/svm/expect/xvm.txt
+
+# M11 slice C survivor detector: both pCPUs shared 2x2-on-2; after VM1's
+# SYSTEM_OFF the survivor's vCPU1 must keep taking its own timer.
+.PHONY: xvm2 test-qemu-xvm2
+XVM2_BINS := $(BUILD_DIR)/xvm2/xvm2-vm0.bin $(BUILD_DIR)/xvm2/xvm2-vm1.bin
+.SECONDARY: $(XVM2_BINS:.bin=.elf)
+xvm2: $(XVM2_BINS)
+
+$(BUILD_DIR)/xvm2/xvm2-vm%.elf: tests/svm/cases/xvm2.c $(SVM_COMMON) tests/svm/svm_lib.h tests/svm/svm.lds
+	@mkdir -p $(dir $@)
+	$(CC) $(SVM_CFLAGS) -DXVM_ID=$* \
+	      -Wl,--no-warn-rwx-segments -T tests/svm/svm.lds -o $@ $< $(SVM_COMMON)
+
+$(BUILD_DIR)/xvm2/xvm2-vm%.bin: $(BUILD_DIR)/xvm2/xvm2-vm%.elf
+	$(OBJCOPY) -O binary $< $@
+
+XVM2_BUILD_DIR := build/test-xvm2
+test-qemu-xvm2:
+	$(MAKE) BUILD_DIR=$(XVM2_BUILD_DIR) HV_GUEST=svm_xvm2 all xvm2
+	LINUX_IMAGE= HYPERVISOR_ELF=$(XVM2_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(XVM2_BUILD_DIR)/xvm2/xvm2-vm0.bin \
+	SVM_BIN2=$(XVM2_BUILD_DIR)/xvm2/xvm2-vm1.bin \
+	sh tests/run_svm_test.sh tests/svm/expect/xvm2.txt
 
 DTC        ?= dtc
 GUEST_DTS  := guest/qemu_virt.dts
@@ -345,7 +372,7 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-xvm
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-xvm test-qemu-xvm2
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh

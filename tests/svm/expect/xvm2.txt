@@ -1,0 +1,9 @@
+[hv] Hello from EL2
+XVM2: start
+XVM2: VM0 CPU_ON(vCPU1) == SUCCESS
+XVM2: VM1 start
+XVM2: VM1 CPU_ON(vCPU1) == SUCCESS
+[hv] PSCI: VM1 SYSTEM_OFF - stopping all vCPUs
+XVM2: v0 alive after VM1 SYSTEM_OFF
+XVM2: v1 kept taking its own timer after VM1 SYSTEM_OFF
+SVM HVC: done (x1=0x0)

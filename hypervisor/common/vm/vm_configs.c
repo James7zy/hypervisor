@@ -55,7 +55,12 @@ const struct vm_config vm_configs[NR_VMS] = {
     [1] = { .vmid = 2, .entry = BOARD_SVM_ENTRY, .mem_base = BOARD_SVM_MEM_BASE,
             .ram_pa = BOARD_SVM2_RAM_PA, .mem_size = BOARD_SVM_MEM_SIZE,
             .bootinfo_ipa = 0,
-#ifdef CONFIG_SVM_XVM
+#ifdef CONFIG_SVM_XVM2
+            /* Survivor profile (M11 C): BOTH pCPUs shared 2x2-on-2, VM1 vCPU1
+             * on pCPU1 — the pCPU whose sibling survives the SYSTEM_OFF
+             * (tests/svm/cases/xvm2.c). */
+            .vcpu_pcpu = {0, 1},
+#elif defined(CONFIG_SVM_XVM)
             /* Cross-VM isolation profile (M11 C T5): VM1 vCPU1 shares
              * pCPU0 with VM0 vCPU0 (tests/svm/cases/xvm.c). */
             .vcpu_pcpu = {2, 0},
