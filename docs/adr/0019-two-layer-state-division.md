@@ -96,7 +96,20 @@ flowchart TB
 - **CPU_SUSPEND 恒走 block 路径（N5，plan 措辞偏离记录）**：非空队列时未按 put 式
   quiesce——retention 允许任意中断唤醒 + 共享 timer 缺口条目覆盖误投；首个
   suspend-with-siblings 消费者出现时复核。
-- **CPU_ON 不刷新 vtimer 影子（N6）**：re-ON 恢复 dying guest 的陈旧 cntv* 值——
-  bounded（re-ON 测试过、Linux 二次编程早），触发：首个 re-ON 后即依赖 timer 语义的用例。
-- 1:1 profile 下 put/resume/EL1 路径**从不执行**（无切换）——ctxsw 是唯一覆盖面，
-  手工 Linux gate 在 B2 期间仅为回归网；共享跑 Linux 留待片 C 拓扑翻转后。
+- ~~**CPU_ON 不刷新 vtimer 影子（N6）**~~（**片 C T1b 修复**）：load 把 CNTV 影子复位为
+  `ctl=IMASK, cval=0`，同时整块清零 EL1 集与 FP 文件（ADR-0020）。
+- ~~1:1 profile 下 put/resume/EL1 路径从不执行~~（**片 C T7**）：Linux 演示拓扑已翻到
+  2×2-on-2，切换路径在真实负载下执行；跨 VM 覆盖面另有 xvm 场景（T5）。
+- **片 C 新增已知缺口**（2026-11-04，各带触发条件）：
+  - `ICH_AP1R0_EL2`（活动优先级）未保存：协作切换只在 guest `wfi` 处发生，此时 guest 不在
+    中断服务中，AP 寄存器为空。触发 = 片 D 抢占（可在中断服务中途换下）。
+  - PPI 27 物理屏蔽（`gic_ppi_set_enable`，secondary 早期 VENG1=0 回退路径）是 per-pCPU 状态，
+    共享 pCPU 的两个 vCPU 共用。触发 = 首个观察到一个 vCPU 的屏蔽饿死另一个 vCPU timer 的场景。
+  - EL1 物理定时器 `CNTP_*` 未保存，且 `CNTHCTL.EL1PCEN=1` 放行 guest 直接访问。触发 = 首个使用
+    CNTP 的 guest（Linux 用 CNTV）。
+  - RK3588 A76/A55 推测性 AT 勘误（1165522/1530923）：切换路径未做勘误要求的序列。触发 =
+    RK3588 bring-up。
+  - `AMAIR_EL1`、`AFSR0/1_EL1`、`CSSELR_EL1` 未保存。触发 = 首个消费者（Linux 的 CSSELR 只在
+    cacheinfo 初始化时写，读 CCSIDR 前现写现用）。
+  - pCPU0 负载形态：2×2-on-2 下两个 VM 的 vCPU0 在 pCPU0 上永远让出轮转、不会都阻塞，背景
+    定时器只在 pCPU1 上承重。不是缺陷，是覆盖面限制；xvm 用例补了 pCPU0 上的离核阻塞情形。
