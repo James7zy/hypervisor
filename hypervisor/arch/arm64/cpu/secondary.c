@@ -57,6 +57,7 @@ void secondary_main(u32 id)
     const unsigned long sgi = rd + GICR_SGI_OFFSET;
     const u32 ppi  = BOARD_VTIMER_IRQ;   /* 27 */
     const u32 kick = BOARD_KICK_SGI;     /* cross-core kick SGI */
+    const u32 maint = BOARD_VGIC_MAINT_IRQ;   /* 25 */
 
     /* 1. EL2 physical CPU interface for this core. */
     SYSREG_WRITE(ICC_SRE_EL2, 0xFULL);          /* SRE|DFB|DIB|Enable */
@@ -70,12 +71,15 @@ void secondary_main(u32 id)
         ;
 
     /* 3. Enable the per-CPU INTIDs in this GICR's SGI/PPI frame: the vtimer
-     *    PPI (27) and the cross-core kick-SGI. Group 1 NS, priority 0xA0. */
+     *    PPI (27), the cross-core kick-SGI and the vGIC maintenance PPI
+     *    (25, M11 C T2). Group 1 NS, priority 0xA0. */
     mmio_write32(sgi + GICR_IGROUPR0,
-                 mmio_read32(sgi + GICR_IGROUPR0) | (1U << ppi) | (1U << kick));
+                 mmio_read32(sgi + GICR_IGROUPR0) | (1U << ppi) | (1U << kick) |
+                 (1U << maint));
     mmio_write8(sgi + GICR_IPRIORITYR + ppi,  0xA0);
     mmio_write8(sgi + GICR_IPRIORITYR + kick, 0xA0);
-    mmio_write32(sgi + GICR_ISENABLER0, (1U << ppi) | (1U << kick));
+    mmio_write8(sgi + GICR_IPRIORITYR + maint, 0xA0);
+    mmio_write32(sgi + GICR_ISENABLER0, (1U << ppi) | (1U << kick) | (1U << maint));
 
     /* 4. CPU interface enable: allow all priorities, Group 1, split EOI. */
     SYSREG_WRITE(ICC_PMR_EL1, 0xFFULL);

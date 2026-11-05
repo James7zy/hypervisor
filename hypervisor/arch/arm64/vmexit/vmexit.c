@@ -98,11 +98,12 @@ static void handle_wfx(struct arch_regs *regs, u64 esr)
              * burned — the vCPU would sleep with a pending vIRQ and no
              * queue entry, and unlike the idle residual it does NOT heal on
              * the next arbitrary interrupt. Re-evaluate: anything queued
-             * behind us, or a remotely published SPI shadow, means the
+             * behind us, a remotely published SPI shadow, or a leftover
+             * SGI bit (M11 C T2), means the
              * wake happened — self-WAKE and requeue. (Masked context: the
              * locked probes are safe here.) */
             if (!sched_queue_empty(current_vcpu_id()) ||
-                v->arch.spi_shadow_pending) {
+                v->arch.spi_shadow_pending || v->arch.sgi_pending) {
                 (void)vcpu_state_step(&v->state, VCPU_EV_WAKE);
                 sched_yield_cur();
             }

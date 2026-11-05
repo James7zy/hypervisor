@@ -10,6 +10,7 @@ int main(void)
     test_mmio();
     test_vcpu_state();
     test_sched_q();
+    test_vgic_sgi_place();
 
     if (tests_failed == 0) {
         printf("PASS (%d assertions)\n", tests_run);

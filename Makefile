@@ -235,16 +235,19 @@ check-offsets-target: $(BUILD_DIR)/check_offsets_target.o
 # itself without it. -U_FORTIFY_SOURCE: Ubuntu default fortify would redirect
 # the tests' memset calls to glibc __memset_chk (fake green).
 HOST_TEST_CFLAGS := -Wall -Wextra -Werror -O2 -g -fno-builtin -U_FORTIFY_SOURCE \
-    -std=c11 -Ihypervisor/include
+    -std=c11 -Ihypervisor/include -Ihypervisor/arch/arm64/vgic
 HOST_TEST_SRCS := tests/host/runner.c tests/host/string_test.c tests/host/mmio_test.c \
     tests/host/vcpu_state_test.c tests/host/sched_q_test.c \
+    tests/host/vgic_sgi_place_test.c \
     hypervisor/lib/string.c hypervisor/common/io/mmio.c \
     hypervisor/common/vm/vcpu_state.c \
-    hypervisor/common/sched/sched_q.c
+    hypervisor/common/sched/sched_q.c \
+    hypervisor/arch/arm64/vgic/vgic_sgi_place.c
 
 $(BUILD_DIR)/host/host_test: $(HOST_TEST_SRCS) tests/host/host_test.h \
     hypervisor/include/mmio.h hypervisor/include/types.h \
-    hypervisor/include/vcpu_state.h hypervisor/include/sched_q.h
+    hypervisor/include/vcpu_state.h hypervisor/include/sched_q.h \
+    hypervisor/arch/arm64/vgic/vgic_lr.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_TEST_CFLAGS) -o $@ $(HOST_TEST_SRCS)
 

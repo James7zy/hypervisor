@@ -68,9 +68,10 @@ void el2_irq_handler(void)
             cpu_arch_halt();
         }
 
-        /* Drain this pCPU's pending SGI bitmap, inject each as a virtual
-         * SGI. */
-        vgic_sgi_drain(current_vcpu_id());
+        /* Drain the current vCPU's pending SGI bitmap into its LRs (M11 C:
+         * per vCPU; a kick for a queued sibling is a no-op here — its
+         * resume drains). */
+        vgic_sgi_drain_vcpu(cv);
 
         /*
          * M5 slice 3: reload ICH_LR1_EL2 (the PL011 vSPI LR) from this
@@ -87,7 +88,7 @@ void el2_irq_handler(void)
          * reload/inject. Without that gate this call would blindly replay a
          * stale (possibly already-consumed-by-the-guest) shadow LR1 on any
          * later, unrelated kick. Separate from and does not touch
-         * sgi_pending[] above.
+         * sgi_pending above.
          */
         vgic_reload_spi_lr(current_vcpu());
     } else if (intid == BOARD_VTIMER_IRQ) {
@@ -118,6 +119,18 @@ void el2_irq_handler(void)
             gic_deactivate(intid);
             gic_ppi_set_enable(current_vcpu_id(), BOARD_VTIMER_IRQ, false);
         }
+    } else if (intid == BOARD_VGIC_MAINT_IRQ) {
+        /* EOI maintenance (M11 C T2): the guest deactivated an SGI slot
+         * that vgic_place_sgis marked EOI because leftovers were waiting.
+         * Refilling (or zeroing) the free slot removes the level
+         * condition, so a full deactivate is storm-free. The live LRs are
+         * cur_vcpu's in every context that can take this (masked sched
+         * loop rebinds before restoring). */
+        struct vcpu *cv = current_vcpu();
+        if (cv != NULL)
+            vgic_sgi_drain_vcpu(cv);
+        gic_priority_drop(intid);
+        gic_deactivate(intid);
     } else if (intid == BOARD_PL011_IRQ) {
         /*
          * PL011 RX: EL2 owns the physical UART exclusively (M5 slice 2).

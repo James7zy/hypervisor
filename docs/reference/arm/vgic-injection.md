@@ -28,7 +28,7 @@
 `arch/arm64/include/arch/vm.h`。影子不是硬件 LR 的持续镜像：guest 消费中断会改变
 live LR，内存不自动回写。远程 SPI 发布期间则可能是内存比 live LR 更新。
 
-当前固定分配 LR0=timer、LR1=vuart SPI、LR2=SGI，LR3 未用于注入；没有通用 LR 分配器。
+当前固定分配 LR0=timer、LR1=vuart SPI、LR2/LR3=SGI 双槽（M11 片 C T2）；没有通用 LR 分配器。
 
 ## 2. 四种注入
 
@@ -37,7 +37,7 @@ live LR，内存不自动回写。远程 SPI 发布期间则可能是内存比 l
 | `vgic_inject_sw(v, vintid, prio)` | LR0 | 0 | secondary 启动早期的 timer 回退路径 |
 | `vgic_inject_hw(v, vintid, pintid, prio)` | LR0 | 1 | guest vGIC 已启用后的 timer PPI 27 |
 | `vgic_inject_spi(target, intid)` | LR1 | 0 | vuart RX，支持本核或远程目标，固定优先级 0xA0 |
-| `vgic_inject_sgi(v, vintid)` | LR2 | 0 | 在目标核注入 guest IPI，固定优先级 0xA0 |
+| `vgic_place_sgis(v, pend)` | LR2/LR3 | 0 | 把目标 vCPU 的待决 SGI 位图放进空闲槽（同 vINTID 合并），返回放不下的位；有剩余时占用槽置 EOI 位，guest deactivate 触发维护 PPI 25 再补槽。固定优先级 0xA0 |
 
 sw/hw/sgi 路径更新影子并写**当前核**的 live LR，调用方必须保证目标在本核。
 SPI 路径自行判断 `target == current_vcpu()`，远程时只更新影子并 kick。
@@ -97,7 +97,7 @@ sequenceDiagram
     V->>K: kick 目标物理核
     K->>T: 物理 SGI
     T->>T: drop + deactivate，检查 owner->off
-    T->>T: vgic_sgi_drain（独立的 IPI 状态）
+    T->>T: vgic_sgi_drain_vcpu(cur_vcpu)（per-vCPU IPI 位图）
     T->>R: 重载本核当前 vCPU 的 SPI
     R->>R: spi_lock 内检查 pending
     opt 有新的远程发布
