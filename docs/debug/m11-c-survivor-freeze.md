@@ -86,13 +86,32 @@ Linux 手工门禁（双 VM 2×2-on-2 → VM1 `poweroff -f` → 读 VM0 的 `arc
    所以影子（CNTV/LR/VMCR）不再跟随 live 状态；随后任何一次 `vgic_restore` 都会用
    **陈旧影子覆盖 live**，把刚注入的 pending 位抹掉。
 
+**现场再加一条（决定性）**：注入后第一次 block/put 时的 `vgic_save` 打印为
+
+```
+[dbg] save p1 vm0 v1 live0=30a0001b0000001b sh0=70a0001b0000001b
+```
+
+即 **live LR0 已回落到 invalid（0x30a0…），而影子仍是 pending（0x70a0…）**，而
+`vgic_save` 对 LR0/LR2/LR3 是**无条件用 live 覆盖影子**（只有 LR1 有 publisher-wins 合并）
+——于是刚注入、guest 还没取的 pending 被丢掉。同一时刻 guest 已越过 wfi 重新武装了
+CNTV（cval 前进），物理电平落下，HW=1 的 LR0 pending 随电平消失。
+
 **据此的根因假设（下一步验证）**：`handle_wfx` case-3 的 BLOCK 之后，唤醒走
 `sched_loop` 的自重复 pick 分支（不 resume）；此时 live 状态由 guest 自己推进、影子停滞，
 一旦再有 `vcpu_arch_resume(v)`（例如被 kick 后重新 pick），`vgic_restore` 用陈旧影子写回
 LR0/CNTV，**吞掉已注入的虚拟中断** → 幸存者的定时器中断永远到不了 guest。
-验证方法：在 `vgic_restore`/`vgic_save` 处打印 LR0 与影子，确认是谁把 `0x70a0…` 写成
-`0x30a0…`；若确认，修法是让 fast-path 重入也保持影子一致（或在注入后立刻把影子当作
-authoritative，禁止 restore 覆盖「比影子更新的 live」）。
+**验证结果**：已确认写者是 `vgic_save`（见上面的 `save … live0=30a0… sh0=70a0…`）。
+
+修法方向（三选一，需关卡①评审）：
+1. `vgic_save` 对 LR0 也做「pending 影子 vs invalid live」的合并：影子 pending 且 live
+   invalid 时保留影子。风险：guest 已经取过（IAR/EOI 走完，live 也是 invalid）时会重复注入
+   一次伪中断——但 vtimer 是电平触发，重复注入会在下一次 EOI 时自然收敛，代价可控。
+2. 注入后不再依赖影子：`vgic_restore` 写 LR0 前，若影子 pending 而 live 无效则沿用影子
+   （等价于 1，只是位置不同）。
+3. 让 WFI-block 的唤醒以「重新注入物理线」为准：resume 前读物理 PPI 状态，电平仍高就重新
+   注入（本质是放弃影子，直接跟随物理电平）。
+候选 3 与 HW=1 的语义最一致，也最不依赖影子的一致性；但改动面最大。
 
 ## 下一步（按优先级）
 
