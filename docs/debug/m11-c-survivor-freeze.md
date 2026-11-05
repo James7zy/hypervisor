@@ -1,7 +1,8 @@
 # M11 片 C：跨 VM SYSTEM_OFF 回归定位
 
 > 2026-11-05 更新：幸存者中断停摆已完成受控 RED → GREEN → 回退 RED。
-> VM1 secondary IABT 亦已定位修复；启动挂死已定位，处理方案评审中。本页不是片 C 验收通过声明。
+> VM1 secondary IABT 亦已定位修复；启动挂死已定位，公平性处理留在既定 D 范围。
+> 开发侧 gate 已通过；本页不是正式测试专家复验/关卡②通过声明。
 
 ## 先撤回旧结论
 
@@ -132,4 +133,5 @@ SVM_BIN=build/diag-wfe/svm/svm-wfe_wait.bin timeout 4 ./scripts/run-qemu.sh </de
 active IRQ round-trip 断言：EOI 前换下再恢复，同优先级 SGI 仍须不可确认。受控把 AP 恢复
 改成清零时该断言 RED，恢复真实 shadow 后 GREEN，防止“只清 AP”伪修复。
 
-全量 `make test` 已通过 10 个 QEMU 场景；最终干净树 Linux 三连尚待执行。正式专家复验不在本轮。
+最终代码 `86e8ad3`：干净树 `make test` 两轮各 10 场景通过，host 两轮通过，Linux 三连通过。
+完整输出摘录见 [报告](../reports/2026-11-05-m11-c-regression-fix.md)。正式专家复验不在本轮。
