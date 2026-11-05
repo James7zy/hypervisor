@@ -146,6 +146,33 @@ live LR0 + 该次 ERET 的 SPSR（PSTATE.I）**，一次运行(5 s)即可判定�
 已排除：`ICC_EOIR1_EL1` / `ICC_IGRPEN1_EL1` 被 TC 陷阱丢弃（日志里没有任何
 `unhandled sysreg C12_C12_*`，QEMU 不 trap 它们）。
 
+## 二分与两个失败修法（避免重复劳动）
+
+用 xvm2 逐提交二分（把 `svm_dual` 的 VM1 亲和强改成 `{0,1}` 后再跑本用例，
+脚本 `/tmp/bisect-c.sh`）：
+
+| 提交 | 结果 |
+|---|---|
+| `24b31f8`（片 C 之前 B2） | 不确定：B2 的 vCPU1 协作语义不同，用例提前 `HC_GUEST_DONE` |
+| `9aef9aa`（T1，C 第一个实现提交） | **RED** |
+| `7bce7e9`（T1b） | RED |
+| `aa50ee4`（T2） | RED |
+| `356dcaf`（T6） | RED |
+
+结论：**只要启用跨 VM 共享（C 的 T7 拓扑 + C 的切换路径）就红**，不是某个单点提交引入；
+B2 没有可比对的绿基线（它根本不允许共享），所以"最早红"落在 T1。
+
+已试过、**无效**的修法（都实测跑过 xvm2，别再试）：
+
+| 试验 | 结果 |
+|---|---|
+| `handle_wfx` 的 WFI 改成「保持 IRQ 屏蔽再 wfi」 | 红（1/…) |
+| 恢复时不再写 `ELR_EL1`/`SPSR_EL1`（怀疑破坏进行中的 guest 异常返回） | 红 1/3 |
+| 注入前加 `vgic_lr0_active()` 守卫（不在服务中重注入） | 红 |
+| vtimer 改软件注入（`vgic_inject_sw`）+ 全 deactivate（放弃 HW=1 链接） | **更差**（3/3 红） |
+| 物理 PPI 注入后全 deactivate（保留 HW=1） | **更差**（3/3 红） |
+| 关掉 EL2 后台定时器（T4 no-op） | 仍红 |
+
 ## 待验证的最后一环（按可能性）
 
 1. **HW=1 LR 的 pending 位与物理线的联动**：注入后 guest 若重新武装 CNTV，物理电平落下，
