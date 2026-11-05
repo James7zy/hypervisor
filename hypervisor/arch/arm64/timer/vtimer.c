@@ -54,6 +54,10 @@ static bool bg_deadline(const struct vcpu *v, u64 *dl)
         return false;
     if ((v->arch.cntv_ctl & (CNTV_CTL_ENABLE | CNTV_CTL_IMASK)) != CNTV_CTL_ENABLE)
         return false;
+    /* ponytail: plain u64 add — exact while cntvoff == 0 (every vCPU today).
+     * A nonzero cntvoff with cval near ~0 wraps to an early deadline (a
+     * spurious, self-limiting wake per rearm). Saturate when per-vCPU
+     * offsets become nonzero (migration / save-restore). */
     *dl = v->arch.cntv_cval + v->arch.cntvoff;
     return true;
 }

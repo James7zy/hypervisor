@@ -87,6 +87,14 @@ struct vcpu_arch {
         u64 fpsr;
         u64 fpcr;
     } __attribute__((aligned(16))) fp;
+    /* Physical Active state of the vtimer PPI 27 (M11 C, tester Critical-1).
+     * HW-forwarded (LR0 HW=1): EL2 only priority-drops, the physical line
+     * stays Active until THIS vCPU's guest deactivates through the LR link.
+     * That state belongs to the vCPU, not the pCPU: saved at put/block,
+     * forced to the incoming vCPU's value at resume/load. Left on the pCPU,
+     * it silenced the next vCPU's timer until the owner came back — forever
+     * if the owner was killed (SYSTEM_OFF of the other VM). */
+    bool timer_ppi_active;
 };
 
 /* Hypervisor callee-saved context, saved by vcpu_arch_run and restored by

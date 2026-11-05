@@ -35,8 +35,8 @@ _Static_assert(offsetof(struct vcpu, arch.ich_lr)        == 0x130,          "ich
 /* Generic-tail field (M11 slice A): NOT read by exception-entry asm, but
  * pinned here so a field insertion that pushes it (or a migration of it into
  * the asm-visible prefix) fails the build instead of silently drifting. */
-_Static_assert(offsetof(struct vcpu, state)              == 0x42C,          "vcpu.state offset mismatch");
-_Static_assert(offsetof(struct vcpu, launched)            == 0x430,          "vcpu.launched offset mismatch");
+_Static_assert(offsetof(struct vcpu, state)              == 0x43C,          "vcpu.state offset mismatch");
+_Static_assert(offsetof(struct vcpu, launched)            == 0x440,          "vcpu.launched offset mismatch");
 /* EL1 bulk set (M11 B2 T4): generic-tail adjacency, whole-block pin. */
 _Static_assert(offsetof(struct vcpu, arch.el1)             == 0x178,          "el1 block offset mismatch");
 _Static_assert(sizeof(((struct vcpu *)0)->arch.el1)        == 0x90,           "el1 block size mismatch");
