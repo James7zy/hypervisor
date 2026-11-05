@@ -197,7 +197,18 @@ void vgic_restore(struct vcpu *vcpu)
     SYSREG_WRITE(ICH_HCR_EL2,  vcpu->arch.ich_hcr_el2);
     SYSREG_WRITE(ICH_VMCR_EL2, vcpu->arch.ich_vmcr_el2);
     SYSREG_WRITE(ICH_LR0_EL2,  vcpu->arch.ich_lr[0]);
+    /* LR1 under spi_lock, and the publisher flag cleared there (M11 C):
+     * once the shadow is in the live register, the live register is the
+     * authority. A flag left set made the NEXT put keep a stale shadow
+     * (publisher-wins merge) over a fresher live value — lost or replayed
+     * console bytes. Same lock as the publisher, so the orders are only
+     * "restore after publish" (new value goes live; the later kick reload
+     * is a no-op) or "publish after restore" (flag stays set; the kick or
+     * the next put/restore applies it). */
+    spin_lock(&vcpu->arch.spi_lock);
     SYSREG_WRITE(ICH_LR1_EL2,  vcpu->arch.ich_lr[1]);
+    vcpu->arch.spi_shadow_pending = false;
+    spin_unlock(&vcpu->arch.spi_lock);
     SYSREG_WRITE(ICH_LR2_EL2,  vcpu->arch.ich_lr[2]);
     SYSREG_WRITE(ICH_LR3_EL2,  vcpu->arch.ich_lr[3]);
     asm volatile("isb");

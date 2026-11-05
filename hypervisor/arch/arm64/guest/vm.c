@@ -89,6 +89,11 @@ void vcpu_arch_load(struct vcpu *v)
      * (current VMID only; Stage-2 stays — a sibling vCPU still runs on
      * it). SCTLR_EL1 has no RES1 bits, so 0 is a legal reset value.
      */
+    /* Stage-2 FIRST (M11 C, gate-1 adjudication a): VTTBR_EL2 selects the
+     * VMID that the tlbi below targets — before this, it still names the
+     * OUTGOING VM, and flushing that would leave the incoming VM's stale
+     * stage-1 entries live. stage2_activate ends with isb. */
+    stage2_activate(v);
     SYSREG_WRITE(SCTLR_EL1, 0ULL);
     __asm__ volatile("isb\n\ttlbi vmalle1\n\tic iallu\n\tdsb nsh\n\tisb"
                      ::: "memory");
@@ -101,8 +106,6 @@ void vcpu_arch_load(struct vcpu *v)
     SYSREG_WRITE(CNTV_CTL_EL0, v->arch.cntv_ctl);
     __asm__ volatile("isb");
 
-    /* Required order: Stage-2 activate BEFORE vGIC restore. */
-    stage2_activate(v);
     vgic_restore(v);
 }
 
@@ -186,11 +189,19 @@ void vcpu_arch_resume(struct vcpu *v)
     SYSREG_WRITE(CNTVOFF_EL2, v->arch.cntvoff);
     SYSREG_WRITE(CNTV_CVAL_EL0, v->arch.cntv_cval);
     SYSREG_WRITE(CNTV_CTL_EL0, v->arch.cntv_ctl);
+    /* Stage-2 BEFORE the EL1 restore (M11 C, gate-1 adjudication a): EL1&0
+     * table walks may happen speculatively while we sit at EL2. With the
+     * incoming EL1 registers under the OUTGOING VMID, those walks would
+     * plant the incoming VM's entries in the outgoing VM's TLB tag — and
+     * the tlbi below (current VMID only) would not remove them. VTTBR
+     * first confines any mixed-window walk to the incoming VMID, which the
+     * trailing tlbi purges. Same VM: rewrites the same VTTBR, harmless. */
+    stage2_activate(v);
     el1_restore(v);
-    /* Same-VMID switch: both vCPUs share the TLB tag. Conservative full
-     * stage-1 flush — asymmetric stage-1 (divergent TTBR0) must not see
-     * the sibling's walk entries. ASID/VMID-tagged avoidance deferred
-     * (condition: RK3588 cost + spec 8.3). */
+    /* Flush the INCOMING VMID's stage-1 entries (tlbi vmalle1 targets the
+     * VMID now in VTTBR_EL2). Conservative: same-VMID siblings with
+     * divergent stage-1 must not see each other's walks either. ASID/VMID-
+     * tagged avoidance deferred (condition: RK3588 cost + spec 8.3). */
     __asm__ volatile("tlbi vmalle1" ::: "memory");
     __asm__ volatile("dsb nsh\n\tisb" ::: "memory");
     /* Reprogram the identity: a resumed vCPU must not read the LAST

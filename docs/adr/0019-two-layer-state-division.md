@@ -14,6 +14,11 @@ M11 的上下文切换需要回答"哪些状态在异常入口保存、哪些在
    SPSR_EL2）——每次异常都发生，`vmexit_asm.S` 不变；`vcpu_arch_put`/`vcpu_arch_block`
    保存 EL1 批量集 + vGIC 影子 + CNTV 影子——只在真实换下/阻塞时发生；`resume` 对称
    恢复 + `tlbi vmalle1` + **重编 `VMPIDR_EL2`**（TID3 转发活寄存器，身份必须随载入者）。
+   **片 C 修订（2026-11-04）**：resume 的固定序为 CNTV → `stage2_activate`（VTTBR/VMID）→
+   EL1 恢复 → `tlbi vmalle1; dsb nsh; isb` → VMPIDR → vGIC。VTTBR 必须先于 EL1 恢复：EL2
+   上可能发生推测性 EL1&0 表遍历，若新 EL1 寄存器配旧 VMID，入 VM 的条目会被种进出 VM
+   的 TLB 标签，而 `tlbi vmalle1` 只作用于当前 VMID，清不掉。load 同理（Stage-2 先于
+   SCTLR 清零与 tlbi；此前的序刷的是出 VMID）。
 2. **EL1 清单（12 项，Q9 推导+半清单实证+bao/xvisor 对照）**：SCTLR、TTBR0/1、TCR、
    MAIR、VBAR、CPACR、TPIDR_EL1、TPIDRRO_EL0、CONTEXTIDR、ESR_EL1、FAR_EL1。恢复序 =
    翻译寄存器先、SCTLR 末（今日惰性，片 C 跨 VM 时承重）。半清单实验 4/4 组对称失败
