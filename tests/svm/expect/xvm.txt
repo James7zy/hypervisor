@@ -1,0 +1,14 @@
+[hv] Hello from EL2
+XVM0: start
+XVM0: CPU_ON(vCPU1) == SUCCESS
+[hv] PSCI: CPU_ON vCPU1 -> ON_PENDING (pCPU0)
+XVM1: fresh-load EL1 zero
+XVM1: fresh-load FP zero
+XVM1: no SGI leaked from VM0
+XVM0: own timer woke it via the bg timer, before the SGIs
+XVM0: SGI 5 and 6 received
+XVM1: isolation intact (EL1/FP/memory)
+[hv] PSCI: VM1 SYSTEM_OFF - stopping all vCPUs
+XVM0: isolation intact (EL1/FP/memory)
+XVM0: ran after VM1 SYSTEM_OFF
+SVM HVC: done (x1=0x0)
