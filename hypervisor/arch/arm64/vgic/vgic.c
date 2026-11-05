@@ -49,6 +49,9 @@ void vgic_init(struct vcpu *vcpu)
     vcpu->arch.ich_lr[2] = 0;
     vcpu->arch.ich_lr[3] = 0;
     vcpu->arch.spi_shadow_pending = false;
+    /* Fresh context: SGIs sent to the dead one are dropped (a racing
+     * sender's bit may be lost — same as an SGI to a powered-off PE). */
+    vcpu->arch.sgi_pending = 0;
 }
 
 void vgic_inject_sw(struct vcpu *vcpu, u32 vintid, u8 prio)
@@ -174,18 +177,20 @@ void vgic_reload_spi_lr(struct vcpu *vcpu)
     spin_unlock(&vcpu->arch.spi_lock);
 }
 
-/* Inject a virtual SGI (INTID 0..15) via ICH_LR2. LR0 is the vtimer and LR1 is
- * the PL011 SPI, both re-injected on their own cadence; SGIs get their own LR
- * so a pending IPI is not clobbered. Software (HW=0) Group-1. Used by the
- * cross-core IPI path (vgic_sgi.c) on the *target* core. */
-void vgic_inject_sgi(struct vcpu *vcpu, u32 vintid)
+/* Virtual SGIs via LR2/LR3 (LR0 = vtimer, LR1 = PL011 SPI); placement rules
+ * in vgic_sgi_place.c. Live and shadow are written together, so this is
+ * correct for a BLOCKED cur_vcpu too (its shadow was saved from these same
+ * LRs, which nothing else changes while it sleeps). */
+u16 vgic_place_sgis(struct vcpu *vcpu, u16 pend)
 {
-    u64 lr = ICH_LR_STATE_PENDING | ICH_LR_GROUP1 |
-             ((u64)0xA0 << ICH_LR_PRIO_SHIFT) |
-             ((u64)vintid & ICH_LR_VINTID_MASK);
+    u64 lr[2] = { SYSREG_READ(ICH_LR2_EL2), SYSREG_READ(ICH_LR3_EL2) };
 
-    vcpu->arch.ich_lr[2] = lr;
-    SYSREG_WRITE(ICH_LR2_EL2, lr);
+    pend = vgic_sgi_place_lrs(lr, pend);
+    vcpu->arch.ich_lr[2] = lr[0];
+    vcpu->arch.ich_lr[3] = lr[1];
+    SYSREG_WRITE(ICH_LR2_EL2, lr[0]);
+    SYSREG_WRITE(ICH_LR3_EL2, lr[1]);
+    return pend;
 }
 
 /* Initial entry (vcpu_arch_load) AND slice-B1 same-pCPU switch re-entry

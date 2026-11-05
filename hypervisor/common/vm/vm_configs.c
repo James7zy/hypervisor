@@ -18,8 +18,8 @@ const struct vm_config vm_configs[NR_VMS] = {
     /*
      * ctxsw detector profile (M11 slice A, D3; shared EXECUTION since B1):
      * both vCPUs affinity to pCPU0 and round-robin via the WFI yield.
-     * sgi_pending[] is keyed by pCPU, so vCPU1-aimed vSGIs would reach
-     * vCPU0 under this profile (B2 decision).
+     * vSGI pending state is per target vCPU since M11 C T2 (was per
+     * pCPU, which made vCPU1-aimed vSGIs reach vCPU0 on this profile).
      *
      * B1 boundary (gate-1 R5 + gate-2 additions): cases on this profile
      * must NOT use the vGIC, must NOT program CNTV, keep DAIF masked, and

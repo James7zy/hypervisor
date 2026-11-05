@@ -34,9 +34,9 @@ struct vcpu_arch {
      * "this kick-SGI is an ordinary cross-core IPI/park-check with nothing
      * new in ich_lr[1]" -- without it, vgic_reload_spi_lr() would blindly
      * replay a stale shadow (already consumed by the guest) back into the
-     * live ICH_LR1_EL2 on every unrelated kick. Mirrors sgi_pending[]'s role
+     * live ICH_LR1_EL2 on every unrelated kick. Mirrors arch.sgi_pending's role
      * for the SGI/IPI case (vgic_sgi.c) but is per-vcpu, separate state --
-     * does not interact with sgi_pending[]. */
+     * does not interact with sgi_pending. */
     bool spi_shadow_pending;
     /* Serializes LR1 payload/pending/live completion; never reset at runtime. */
     struct spinlock spi_lock;
@@ -74,6 +74,11 @@ struct vcpu_arch {
         u64 par_el1;
         u64 cntkctl_el1;
     } el1;
+    /* Pending virtual SGIs (INTID 0..15 -> bits), per TARGET vCPU (M11 C
+     * T2; was per pCPU, wrong once a pCPU hosts several vCPUs). Written
+     * cross-core under vgic_sgi.c's sgi_lock; drained into LR2/LR3 by the
+     * pCPU whose cur_vcpu this is. */
+    u16 sgi_pending;
 };
 
 /* Hypervisor callee-saved context, saved by vcpu_arch_run and restored by

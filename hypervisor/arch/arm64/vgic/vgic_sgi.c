@@ -29,8 +29,7 @@
 #include <gic_v3.h>
 #include "vgic_sgi.h"
 
-/* Per-vCPU pending SGIs (INTID 0..15 → bits 0..15). Written cross-core. */
-static volatile u16 sgi_pending[NR_CPUS];
+/* Guards every vcpu->arch.sgi_pending (cross-core RMW). */
 static struct spinlock sgi_lock = SPINLOCK_INIT;
 
 /* ICC_SGI1R_EL1 fields (Arm IHI0069). For our flat 2-vCPU topology the target
@@ -41,10 +40,15 @@ static struct spinlock sgi_lock = SPINLOCK_INIT;
 #define SGI1R_IRM           (1ULL << 40)       /* 1 = broadcast to all but self */
 
 /*
- * Trap path (sender pCPU): decode the guest's ICC_SGI1R_EL1 value, mark the
- * target vCPUs' pending bitmaps, and kick each target pCPU. Targets are
- * VM-local vCPU indices; the pCPU slot comes from the affinity table
- * vcpu_pcpu[idx] (1:1 data, no scheduler yet).
+ * Trap path (sender pCPU): decode the guest's ICC_SGI1R_EL1 value and mark
+ * each TARGET vCPU's own pending bitmap (M11 C T2: per vCPU, not per pCPU
+ * — a pCPU may host several). Delivery by where the target is:
+ *   - itself: drain now (we are its pCPU, it is cur_vcpu);
+ *   - cur_vcpu of another pCPU: the kick's handler drains it;
+ *   - queued RUNNABLE / BLOCKED: resume/load drains it after vgic_restore;
+ *     sched_wake requeues a BLOCKED one (and kicks its pCPU).
+ * The kick goes to the target's affinity pCPU unconditionally (as before);
+ * if that pCPU's cur_vcpu is someone else its drain is a cheap no-op.
  */
 void vgic_sgi_trap(u64 sgi1r)
 {
@@ -63,39 +67,37 @@ void vgic_sgi_trap(u64 sgi1r)
         if (!(targets & (1U << idx)))
             continue;
 
-        u32 pcpu = m->config->vcpu_pcpu[idx];    /* physical slot */
+        struct vcpu *t = &m->vcpu[idx];
+        u32 pcpu = m->config->vcpu_pcpu[idx];
 
         spin_lock(&sgi_lock);
-        sgi_pending[pcpu] |= (u16)(1U << vintid);
+        t->arch.sgi_pending |= (u16)(1U << vintid);
         spin_unlock(&sgi_lock);
 
-        if (idx == self) {
-            /* Self-IPI: inject directly, no physical kick needed. */
-            vgic_sgi_drain(pcpu);
+        if (t == sender) {
+            vgic_sgi_drain_vcpu(t);         /* self-IPI: no kick needed */
         } else {
-            gic_kick_pcpu(pcpu);
+            if (pcpu != current_vcpu_id())
+                gic_kick_pcpu(pcpu);
+            sched_wake(t);                  /* no-op unless BLOCKED */
         }
     }
 }
 
 /*
- * Target path (kicked pCPU): drain this core's pending SGI bitmap and inject
- * each as a virtual SGI. Called from el2_irq_handler on BOARD_KICK_SGI.
+ * Inject `v`'s pending SGIs into its LRs, clearing only the bits that were
+ * placed (vgic_place_sgis); leftovers wait for the EOI maintenance PPI or
+ * the next resume. `v` must be this pCPU's cur_vcpu. Called from the
+ * self-IPI trap, the kick and maintenance IRQ branches, and resume/load.
  */
-void vgic_sgi_drain(u32 cpu)
+void vgic_sgi_drain_vcpu(struct vcpu *v)
 {
-    u16 pend;
-
     spin_lock(&sgi_lock);
-    pend = sgi_pending[cpu];
-    sgi_pending[cpu] = 0;
+    u16 pend = v->arch.sgi_pending;
+    if (pend)
+        v->arch.sgi_pending = vgic_place_sgis(v, pend);
     spin_unlock(&sgi_lock);
 
-    /* Drain always runs ON pCPU `cpu`; its pinned vCPU is cur_vcpu. */
-    struct vcpu *v = percpu[cpu].cur_vcpu;
-    for (u32 intid = 0; intid < 16U; intid++) {
-        if (pend & (1U << intid))
-            vgic_inject_sgi(v, intid);
-    }
-    sched_wake(v);   /* once: no-op unless BLOCKED (M11 B2) */
+    if (pend)
+        sched_wake(v);   /* blocked cur_vcpu now has a pending vIRQ */
 }
