@@ -3,6 +3,7 @@ SVM: launching VMID=
 [hv] PSCI: CPU_ON vCPU1 -> ON_PENDING (pCPU0)
 CTXSW: stamps written (x19-x28)
 CTXSW: CPU_ON(vCPU1) == SUCCESS
+CTXSW: WFE let queued secondary run
 CTXSW: v1
 CTXSW: r0
 CTXSW: r1
