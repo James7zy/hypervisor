@@ -44,6 +44,9 @@ void test_vcpu_state(void)
         /* BLOCKED   */ { 0, 0, 0, 0, 1, 1, 0 },
     };
     for (int i = 0; i < 5; i++) {
+        enum vcpu_state stopping = states[i];
+        TEST_ASSERT(vcpu_state_stop(&stopping) == states[i]);
+        TEST_ASSERT(stopping == VCPU_OFF);
         for (int j = 0; j < 7; j++) {
             if (legal[i][j])
                 continue;
@@ -52,4 +55,12 @@ void test_vcpu_state(void)
             TEST_ASSERT(s == states[i]);   /* illegal: untouched */
         }
     }
+
+    /* Sweep sampled RUNNABLE, but LOAD wins before OFF: stop must report
+     * RUNNING so the caller kicks, rather than reuse the stale sample. */
+    enum vcpu_state s = VCPU_RUNNABLE;
+    TEST_ASSERT(vcpu_state_step(&s, VCPU_EV_LOAD) == 0);
+    TEST_ASSERT(vcpu_state_stop(&s) == VCPU_RUNNING);
+    TEST_ASSERT(vcpu_state_step(&s, VCPU_EV_LOAD) == -1);
+    TEST_ASSERT(s == VCPU_OFF);
 }

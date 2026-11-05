@@ -23,7 +23,7 @@ void sched_init(void)
     for (u32 vmi = 0; vmi < (u32)NR_VMS; vmi++) {
         for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++) {
             struct vcpu *v = &vm[vmi].vcpu[i];
-            if (v->state == VCPU_RUNNABLE)
+            if (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_RUNNABLE)
                 (void)sched_q_enqueue(&queues[vm[vmi].config->vcpu_pcpu[i]], v);
         }
     }
@@ -101,15 +101,17 @@ void sched_loop(u32 pcpu)
             percpu[pcpu].idle_window = 0;
             continue;
         }
-        if (v->state != VCPU_RUNNABLE && v->state != VCPU_ON_PENDING)
+        enum vcpu_state state = __atomic_load_n(&v->state, __ATOMIC_ACQUIRE);
+        if (state != VCPU_RUNNABLE && state != VCPU_ON_PENDING)
             continue;                       /* swept: drop it, pick again */
         if (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_ON_PENDING)
             (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
-        if (v->state != VCPU_RUNNABLE)
+        if (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) != VCPU_RUNNABLE)
             continue;                       /* lost the race above */
 
         if (v != prev) {
-            if (prev != NULL && prev->state == VCPU_RUNNABLE)
+            if (prev != NULL &&
+                __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNABLE)
                 vcpu_arch_put(prev);        /* real switch-away only */
             percpu[pcpu].cur_vcpu = v;      /* every pick re-binds */
             if (v->launched) {

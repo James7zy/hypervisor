@@ -32,10 +32,12 @@ enum vcpu_event {
 };
 
 /*
- * Apply event `e` to state `*s` in place. Returns 0 on a legal transition,
- * -1 (state untouched) on an illegal one. Pure logic: host-testable,
- * arch-neutral (types.h only).
+ * Atomically apply event `e`. Returns 0 when the legal edge commits,
+ * -1 on an illegal/lost-race edge (no write by this caller). Acquire/release
+ * publishes the CPU_ON register file and orders cross-pCPU wake/stop.
  */
 int vcpu_state_step(enum vcpu_state *s, enum vcpu_event e);
+/* Publish OFF and return the state at that exact point (for stop-kick). */
+enum vcpu_state vcpu_state_stop(enum vcpu_state *s);
 
 #endif /* HV_VCPU_STATE_H */
