@@ -67,10 +67,11 @@ Linux gate 通过；最终代码 `86e8ad3` 在干净树上又完成两轮全量 
 
 ## 启动挂死：已定位，保留明确限制
 
-旧 HV 在校准的聚焦启动探测中第 14 次真实挂死（前 13 次通过）：pCPU0 的 VM0/v0 在
-`multi_cpu_stop` 等待排在 pCPU1 的 VM0/v1；pCPU1 的 VM1/v1 在 `csd_lock_wait` /
-`kick_all_cpus_sync` 等待排在 pCPU0 的 VM1/v0。两队列 count=1，AP=0。
-当前 WFE 只跳过，不 yield；这是共享 pCPU 上的协作等待死锁，不是 banner 假阴性。
+旧 HV 在校准的聚焦启动探测中第 14 次真实挂死（前 13 次通过）：pCPU0 current 为 VM0/v0，
+保存的 guest LR 指向 `multi_cpu_stop`，同 VM 的 v1 排在 pCPU1；pCPU1 的 VM1/v1 在
+`csd_lock_wait` / `kick_all_cpus_sync` 等待排在 pCPU0 的 VM1/v0。两队列 count=1。
+before-restore AP 诊断为零，但不是冻结时全部 live AP 的快照。现场支持共享 pCPU 的
+协作等待死锁，不是 banner 假阴性；HV 的 WFE handler 即使可达也只跳过、不 yield。
 
 实际 QEMU trace 证明 WFE 不产生陷阱（4 秒、133 个异常中 WFx=0），故不实施无效的
 WFE handler 修复。无条件 kick 轮转也被架构诊断否决：可能换下刚收到 IPI 的 current，

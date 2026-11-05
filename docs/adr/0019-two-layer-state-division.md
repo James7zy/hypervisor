@@ -19,10 +19,11 @@ M11 的上下文切换需要回答"哪些状态在异常入口保存、哪些在
    上可能发生推测性 EL1&0 表遍历，若新 EL1 寄存器配旧 VMID，入 VM 的条目会被种进出 VM
    的 TLB 标签，而 `tlbi vmalle1` 只作用于当前 VMID，清不掉。load 同理（Stage-2 先于
    SCTLR 清零与 tlbi；此前的序刷的是出 VMID）。
-2. **EL1 清单（12 项，Q9 推导+半清单实证+bao/xvisor 对照）**：SCTLR、TTBR0/1、TCR、
-   MAIR、VBAR、CPACR、TPIDR_EL1、TPIDRRO_EL0、CONTEXTIDR、ESR_EL1、FAR_EL1。恢复序 =
-   翻译寄存器先、SCTLR 末（今日惰性，片 C 跨 VM 时承重）。半清单实验 4/4 组对称失败
-   见 `docs/debug/m11-b2-el1-halflist.md`。
+2. **EL1 清单**：B2 基线 12 项（Q9 推导+半清单实证+bao/xvisor 对照）：SCTLR、TTBR0/1、
+   TCR、MAIR、VBAR、CPACR、TPIDR_EL1、TPIDRRO_EL0、CONTEXTIDR、ESR_EL1、FAR_EL1。
+   **片 C 补齐到 18 项**：再加 SP_EL0、ELR_EL1、SPSR_EL1、TPIDR_EL0、PAR_EL1、CNTKCTL_EL1。
+   恢复序 = 翻译寄存器先、SCTLR 末。半清单实验 4/4 组对称失败见
+   `docs/debug/m11-b2-el1-halflist.md`；FP 文件按 ADR-0020 在 C 调度点调用汇编存取。
 3. **vGIC 运行期协议 = publisher-wins**（§8.1/D13）：`vgic_save` 在 `spi_lock` 内合并——
    `spi_shadow_pending` 置位即远端发布更新，保影子弃活读；否则活读。B1 的"无发布者"
    限定解除。
@@ -51,14 +52,16 @@ flowchart TB
         GPR["GPR 帧 x0-x30/SP/ELR/SPSR"]
     end
     subgraph PUT["put / block（每换下/阻塞，C）"]
-        EL1["EL1 12 项"]
+        EL1["EL1 18 项 + FP 文件"]
         VGIC["vGIC LR + AP0/AP1（LR1 publisher-wins 合并）"]
         CNTV["CNTV 影子（put:IMASK / block:LIVE）"]
     end
     subgraph RES["resume（每重入，C）"]
-        R1["EL1 恢复（翻译先 SCTLR 末）"]
-        R2["tlbi vmalle1 + VMPIDR 重编"]
-        R3["vGIC + CNTV 恢复"]
+        R0["CNTV 恢复"] --> R1["Stage-2 / VTTBR"]
+        R1 --> R2["EL1 恢复 + FP（翻译先 SCTLR 末）"]
+        R2 --> R3["tlbi vmalle1 + 屏障 + VMPIDR"]
+        R3 --> R4["vGIC LR/AP 恢复 + SGI drain"]
+        R4 --> R5["背景 timer 重编"]
     end
     GPR -.帧已在 vcpu->regs.-> PUT
     PUT --> RES
@@ -118,6 +121,9 @@ flowchart TB
   保留 `wfe_wait` 非 gate 诊断；处理归既定片 D 的抢占/公平性设计，进入 D 时必须以此
   rendezvous 回归作为验收输入。**当前仍不能保证任意 Linux 启动都成功**，不得用有限
   次绿色宣称此缺口消失。目标关联的通知调度若提前实施，须另行明确批准协议。
+- **异步 stop / re-ON 的验证上限**：OFF exchange 与 LOAD CAS 已线性化，但没有 stop ack，
+  不保证 OFF 发布瞬间零 guest 指令，也未验证完整并发 CPU_ON 生命周期。触发 = 首个需要
+  同步销毁或立即复用停止 vCPU 资源的消费者；届时先明确静止确认协议，不能仅凭 OFF 状态复用。
 - **片 C 新增已知缺口**（2026-11-04，各带触发条件）：
   - ~~`ICH_AP1R0_EL2` 未保存、仅片 D 触发~~：2026-11-05 已修 AP0/AP1 完整上下文。
     原假设被 SYSTEM_OFF 在 stop IPI 内换下的现场与 xvm2 受控红证伪。
@@ -130,5 +136,7 @@ flowchart TB
     RK3588 bring-up。
   - `AMAIR_EL1`、`AFSR0/1_EL1`、`CSSELR_EL1` 未保存。触发 = 首个消费者（Linux 的 CSSELR 只在
     cacheinfo 初始化时写，读 CCSIDR 前现写现用）。
+  - `ICC_RPR_EL1` 的 TC trap 仍返回常量 0，不代表真实 running priority。触发 = 首个依赖
+    RPR 值作逻辑判断的 guest；本轮 active IRQ 测试直接验证 IAR 投递，不借此 stub 判断 AP。
   - pCPU0 负载形态：2×2-on-2 下两个 VM 的 vCPU0 在 pCPU0 上永远让出轮转、不会都阻塞，背景
     定时器只在 pCPU1 上承重。不是缺陷，是覆盖面限制；xvm 用例补了 pCPU0 上的离核阻塞情形。
