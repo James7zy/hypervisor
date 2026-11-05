@@ -6,6 +6,11 @@
 > ADR-0019（修订）/ [ADR-0020](../adr/0020-eager-fp-simd-save.md) /
 > [xvm 受控红](../debug/m11-c-xvm-controlled-red.md)。
 
+> **2026-11-05 更新**：两项 SYSTEM_OFF 回归已在后续 feature 修复并补受控红，见
+> [修复 devlog](2026-11-05-m11-c-regression-fix.md)。启动挂死确认为共享 pCPU 协作等待饥饿，
+> 本轮仅定位，未实施片 D。下文为合入时的历史记录，原手工 gate 数字不能替代新检测网，
+> 也不代表正式复验或关卡②已通过。
+
 ## 这是什么
 
 B2 让**同一个 VM** 的两个 vCPU 安全地共享 pCPU；片 C 把共享推到**跨 VM**：两个 Linux VM 的
@@ -99,7 +104,8 @@ ISAR1/ISAR2 的 PAuth 字段读作 0。
 
 ## 已知缺口（详见 ADR-0019）
 
-`ICH_AP1R0_EL2` 未保存（片 D 抢占触发）、PPI 27 物理屏蔽 per-pCPU 共用、`CNTP_*` 未保存、
+~~`ICH_AP1R0_EL2` 未保存（片 D 抢占触发）~~（11-05 已补 AP0/AP1，SYSTEM_OFF 也会在 IRQ 内换下）、
+PPI 27 物理屏蔽 per-pCPU 共用、`CNTP_*` 未保存、
 RK3588 推测性 AT 勘误、AMAIR/AFSR/CSSELR、pCPU0 永久让出的负载形态。协作调度无抢占：
 忙等的 vCPU 会饿死同 pCPU 的另一个 VM（片 D）。vuart TX 按行缓冲是片 D 前置。
 

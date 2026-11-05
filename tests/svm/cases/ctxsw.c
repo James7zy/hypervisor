@@ -22,7 +22,6 @@
 #define ROUNDS 8
 
 static volatile unsigned long turn;      /* round counter shared by both */
-static volatile int secondary_ready;
 /* ---- vtimer segment (M11 B2 T3, D4) ---------------------------------- */
 /* R5 CNTV/vGIC bans LIFT for this segment (per the B2 plan): the
  * publisher-wins merge is pending (T5); interim safety = all publishers
@@ -31,6 +30,7 @@ static volatile int secondary_ready;
  * one pCPU; each interrupt must land in its owner's context and each
  * owner's timer state must survive every switch. */
 static volatile unsigned long fired_count;
+static volatile unsigned long irq_roundtrips;
 
 void svm_irq_handler(void)
 {
@@ -43,6 +43,20 @@ void svm_irq_handler(void)
         __asm__ volatile("msr CNTV_CTL_EL0, %0" :: "r"(0UL));  /* disarm MINE */
         __asm__ volatile("isb");
         fired_count++;
+        /* Unlike xvm2's terminal stop IPI, this active IRQ must survive a
+         * round-trip and then EOI. Clearing AP on every switch is wrong. */
+        __asm__ volatile("wfi");
+        unsigned long aff, blocked;
+        __asm__ volatile("mrs %0, mpidr_el1" : "=r"(aff));
+        __asm__ volatile("msr ICC_SGI1R_EL1, %0\n\tisb"
+                         :: "r"((5UL << 24) | (1UL << (aff & 0xFFUL))));
+        /* The same-priority SGI cannot be acknowledged until this timer
+         * EOIs. Test delivery itself, not the TC-trapped RPR stub. */
+        __asm__ volatile("mrs %0, ICC_IAR1_EL1" : "=r"(blocked));
+        if ((blocked & 0xFFFFFFUL) == 1023UL)
+            irq_roundtrips++;
+        else
+            __asm__ volatile("msr ICC_EOIR1_EL1, %0" :: "r"(blocked));
     }
 
     __asm__ volatile("msr ICC_EOIR1_EL1, %0" :: "r"(iar));
@@ -98,7 +112,6 @@ static volatile int v1_final;
 static void vcpu1_main(void) __attribute__((used));
 static void vcpu1_main(void)
 {
-    secondary_ready = 1;
     for (;;) {
         if (turn >= ROUNDS) {
             /* GPR rounds over: stamp MY (different) EL1 values first — the
@@ -199,12 +212,6 @@ void SVM_ENTRY _start(void)
                                (unsigned long)ctxsw_secondary_entry, 0UL);
     check(r == 0, "CTXSW: CPU_ON(vCPU1) == SUCCESS\n");
 
-    /* A queued peer must run even when the caller waits with WFE, as
-     * Linux does in synchronous IPI/stop-machine rendezvous. */
-    while (!secondary_ready)
-        __asm__ volatile("wfe");
-    svm_puts("CTXSW: WFE let queued secondary run\n");
-
     while (turn < ROUNDS) {
         /* Round-indexed markers: the expect file pins r0..r7, so a
          * scheduler that under-rotates fails the gate (tester N4). */
@@ -270,6 +277,7 @@ void SVM_ENTRY _start(void)
         check((mid & 0xFFUL) == 0UL, "CTXSW: v0 MPIDR Aff0 == 0\n");
     }
     svm_puts("CTXSW: both timers fired in their owners\n");
+    check(irq_roundtrips == 2UL, "CTXSW: active IRQ priorities survived switch\n");
 
     svm_done(0);
 }
