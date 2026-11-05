@@ -159,7 +159,7 @@ void vgic_inject_spi(struct vcpu *target, u32 intid)
     }
     spin_unlock(&target->arch.spi_lock);
 
-    if (!local && target->state != VCPU_OFF) {
+    if (!local && __atomic_load_n(&target->state, __ATOMIC_ACQUIRE) != VCPU_OFF) {
         asm volatile("dsb ish" ::: "memory");
         gic_kick_pcpu(pcpu);
     }

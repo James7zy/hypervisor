@@ -34,7 +34,8 @@ arch-includes := \
 
 # AArch64-only codegen: no FP/SIMD (no FP state is saved), no unaligned
 # accesses (Device memory and MMU-off boot faults on them).
-arch-cflags := -mgeneral-regs-only -mstrict-align
+# Atomic state transitions must be inline LL/SC, not libgcc outline helpers.
+arch-cflags := -mgeneral-regs-only -mstrict-align -mno-outline-atomics
 
 arch-ldscript := hypervisor/arch/arm64/board/$(BOARD)/linker.lds
 
