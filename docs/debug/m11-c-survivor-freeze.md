@@ -113,6 +113,19 @@ LR0/CNTV，**吞掉已注入的虚拟中断** → 幸存者的定时器中断永
    注入（本质是放弃影子，直接跟随物理电平）。
 候选 3 与 HW=1 的语义最一致，也最不依赖影子的一致性；但改动面最大。
 
+## 进一步收窄（guest 侧计数）
+
+在 xvm2 里按 aff0 分开计数后：**两个 pCPU 上的幸存 vCPU 都只收到 1 次 vtimer 中断**
+（`t0=1`、`by1=1`）——即 `SYSTEM_OFF` 之后的**第一次** tick 正常，**之后再也不来**。
+配合上一条（live LR0 已 invalid、影子仍 pending、`vgic_save` 无条件覆盖），现象是：
+第一次中断被取走并 EOI（LR 变 invalid），此后每次注入的 pending 都在 guest 取到之前
+被丢掉。
+
+未定的最后一环：注入时确实写了 pending（`0x70a0…`），下一次 `vgic_save` 时 live 已
+`0x30a0…`。要么是 guest 抢先重新武装 CNTV 让电平落下（HW=1 的 LR 随电平丢 pending），
+要么是 ERET 之后 CPU 没把 pending 的 vIRQ 当成立即中断。下一步应打印 **ERET 之前的
+live LR0 + 该次 ERET 的 SPSR（PSTATE.I）**，一次运行(5 s)即可判定。
+
 ## 下一步（按优先级）
 
 1. **吃透 +0x80000**：给 guest 一个必然触发的 WFI（如刚起机的 early idle），打印陷阱
