@@ -47,10 +47,12 @@ void el2_irq_handler(void)
          * Whole-VM power-down (M11 slice A): the SYSTEM_OFF sweep set every
          * vCPU of this VM OFF and kicked only the siblings that were running
          * in their guest (vpsci.c psci_system_off_vm). We are such a sibling:
-         * do NOT drain the SGI bitmap or return to the guest loop -- the only
-         * re-entry point back to the guest from this handler is the trailing
-         * eret in irq_handler_asm.S, so parking HERE, before returning, is
-         * the only place that can prevent this vCPU from ever running again.
+         * do NOT drain the SGI bitmap or return -- the trailing eret in
+         * irq_handler_asm.S would re-enter the dead guest. Unwind to the run
+         * loop instead (M11 C T6, gate-1 R2; same unwind as the sweep's own
+         * pCPU): it sees prev OFF and picks the next vCPU. Halting here, as
+         * before, bricked a SHARED pCPU — another VM's vCPUs queued on it
+         * never ran again.
          * The cur_vcpu NULL guard is defense in depth for a future path that
          * reaches EL2 C on a vCPU-less pCPU (today only a Lower-EL exit gets
          * here, which such a pCPU never takes; gate-1 A1).
@@ -64,9 +66,12 @@ void el2_irq_handler(void)
                  * Return instead — sched_loop re-picks and stays live. */
                 return;
             }
-            printk("[hv] pCPU%u: vCPU off, parking\n",
-                   (unsigned)current_vcpu_id());
-            cpu_arch_halt();
+            if (cv == NULL) {
+                printk("[hv] pCPU%u: no vCPU, parking\n",
+                       (unsigned)current_vcpu_id());
+                cpu_arch_halt();   /* no run loop context to unwind to */
+            }
+            hv_restore();          /* noreturn: run loop re-picks */
         }
 
         /* Drain the current vCPU's pending SGI bitmap into its LRs (M11 C:
