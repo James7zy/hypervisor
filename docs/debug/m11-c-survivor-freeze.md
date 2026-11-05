@@ -208,6 +208,23 @@ guest 轮询只得到 1023）。
 已试过并排除（含本轮）：忙等（不 block）仍红 → 排除 block/wake 路径；直接轮询 IAR 拿到 1023
 → 排除 IRQ 异常/向量路径；正是这两条把矛头指向"物理 Active 被固化"。
 
+## 重要更正：xvm2 的 RED 可能混入了测试侧因素
+
+用 QEMU `-d int` 抓 xvm2 时发现：CPU1 上出现 **113 次 `Taking exception 14 [Virtual IRQ]`**，
+最后一次是 `ELR/PC 0x402002d4`（guest 的 `wfi`）、向量 `0x40200a80`（= VBAR+0x280，正确）、
+返回同一个 PC。也就是说**虚拟中断其实一直在投递**；而 guest 侧的 `IAR` 只把其中 1 次认成
+27（其余记录的 `last` 是 INTID **1**），且 `vgic_sgi_drain_vcpu` 的 `sgi_pending` 全程为 0
+（没有我们的 SGI 注入）。
+
+结论：xvm2 的红**不能**再当作"HW LR 不可交付"的证据——它更像
+① guest 侧 `IAR` 读到的 INTID 与注入的 vINTID 不一致（可能是我们的 IAR/EOI 模拟或测试 guest
+的 IRQ 记录问题），或 ② 测试 guest 对多次投递只成功处理一次。
+因此**可信的失败信号仍是 Linux 手工门禁**（真实 Linux 向量、`arch_timer` 计数停住）。
+
+下一步必须先把 xvm2 这条检测网的"红"校准（用最小 SVM 用例验证：注入 vINTID 27 →
+guest IAR 必须读到 27 → EOI 后 `vgic_has_pending` 为 0 → 再次注入仍能读到 27），否则
+检测网本身不可信，也就不能拿它当修复的验收依据。
+
 ## 待验证的最后一环（按可能性）
 
 1. **HW=1 LR 的 pending 位与物理线的联动**：注入后 guest 若重新武装 CNTV，物理电平落下，
