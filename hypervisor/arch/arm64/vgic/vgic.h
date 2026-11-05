@@ -13,13 +13,7 @@
 #define ICH_HCR_EL2_EN      (1ULL << 0)
 #define ICH_HCR_EL2_TC      (1ULL << 10)   /* trap guest ICC_SGI*R_EL1 to EL2 */
 
-/* ICH_LR<n>_EL2 fields (GICv3, 64-bit list register). */
-#define ICH_LR_STATE_PENDING (1ULL << 62)   /* State[63:62] = 0b01 (Pending) */
-#define ICH_LR_HW            (1ULL << 61)    /* 0 = software injection      */
-#define ICH_LR_GROUP1        (1ULL << 60)    /* Group 1                     */
-#define ICH_LR_PRIO_SHIFT    48              /* Priority[55:48]             */
-#define ICH_LR_PINTID_SHIFT  32              /* pINTID[44:32] (HW=1)        */
-#define ICH_LR_VINTID_MASK   0xFFFFFFFFULL   /* vINTID[31:0]                */
+#include "vgic_lr.h"   /* ICH_LR_* fields */
 
 /* Pre-entry initialization only; never resets the BSS-zeroed SPI lock. */
 void vgic_init(struct vcpu *vcpu);
@@ -63,9 +57,11 @@ void vgic_probe(void);
  * pass its current vCPU in masked EL2 IRQ context. */
 void vgic_reload_spi_lr(struct vcpu *vcpu);
 
-/* Inject a virtual SGI (INTID 0..15) via ICH_LR2 (LR0=vtimer, LR1=PL011).
- * Software (HW=0) Group-1, used by the cross-core IPI path (vgic_sgi.c). */
-void vgic_inject_sgi(struct vcpu *vcpu, u32 vintid);
+/* Place pending virtual SGIs (bitmap `pend`) into the SGI list registers
+ * LR2/LR3 of `vcpu`, which must be THIS pCPU's cur_vcpu (its state is in
+ * the live LRs). Returns the bits that found no LR. Software (HW=0)
+ * Group-1. Used by vgic_sgi.c's drain under sgi_lock. */
+u16 vgic_place_sgis(struct vcpu *vcpu, u16 pend);
 
 /* save has no callers; restore is initial-entry-only under static pinning.
  * Neither is runtime scheduler-safe against remote SPI publication. */

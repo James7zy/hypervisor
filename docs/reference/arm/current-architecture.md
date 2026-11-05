@@ -207,7 +207,7 @@ sequenceDiagram
 
 | INTID | 来源 | 处理 |
 |---|---|---|
-| kick SGI | 跨核踢醒 | 如果本 VM 已下电则停核；否则 `vgic_sgi_drain` 取出待投递的 IPI，`vgic_reload_spi_lr` 重载 SPI 影子 |
+| kick SGI | 跨核踢醒 | 如果本 VM 已下电则停核；否则 `vgic_sgi_drain_vcpu` 取出当前 vCPU 待投递的 IPI（per-vCPU 位图，LR2/LR3 双槽），`vgic_reload_spi_lr` 重载 SPI 影子 |
 | 27 | 虚拟 timer PPI | guest 使能了虚拟中断时硬件转发（`vgic_inject_hw`），否则软件注入并临时屏蔽 |
 | PL011 SPI | 物理 UART RX | `console_rx_drain()`，设备逻辑不在这里 |
 

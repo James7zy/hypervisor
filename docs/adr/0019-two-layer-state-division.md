@@ -70,9 +70,11 @@ flowchart TB
 - **共享 pCPU 自 timer 唤醒缺口**：阻塞 vCPU 的 pCPU 后来跑了他者时，其 PPI 误投
   cur_vcpu——EL2 背景定时器（KVM/bao 式 deadline 模拟）的触发条件 = 首个依赖自身
   timer 的共享阻塞场景。
-- **共享 profile 跨 vCPU SGI 缺口**：`sgi_pending[]` 按 pCPU 键控，共享时误投当前
-  vCPU；per-vCPU LR 投递的触发 = 首个 intra-VM 共享 SGI 消费者（片 C 的 2×2-on-2 每
-  VM 仍 1:1，不受影响）。
+- ~~**共享 profile 跨 vCPU SGI 缺口**~~（**片 C T2 修复**）：`sgi_pending[]` 按 pCPU
+  键控，共享时误投当前 vCPU。原记"片 C 的 2×2-on-2 每 VM 仍 1:1，不受影响"为**误判**：
+  键是 pCPU 而非 (VM, vCPU)，跨 VM 共享一个 pCPU 时发给 VM1 vCPU0 的 SGI 会注入当时在跑
+  的 VM0 vCPU0（关卡① R3）。现为 per-vCPU `arch.sgi_pending` + LR2/LR3 双槽 + EOI
+  维护 PPI 25 补槽（不用 NPIE：两槽皆 active-only 时 NPIE 电平持续而无可注入，饿死 guest）。
 - tlbi vmalle1 为保守全刷；免失效（ASID/VMID tag）条件 = RK3588 实测成本 + §8.3。
 - **idle 窗口残余竞态（测试专家 N1，2026-10-31 实证分析）**：窗口为"解掩蔽→复查队列→
   wfi→掩蔽"；已 pending 的唤醒会被复查观察到（闭合主情形），但"复查通过→wfi 执行"之间

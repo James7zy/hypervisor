@@ -67,6 +67,16 @@ void gic_init(void)
         mmio_write32(sgi + GICR_ISENABLER0, (1U << kick));
     }
 
+    /* 3a'. vGIC maintenance PPI (M11 C T2: SGI LR-slot refill on EOI).
+     *      secondary_main enables it on its own GICR. */
+    {
+        const u32 maint = BOARD_VGIC_MAINT_IRQ;
+        mmio_write32(sgi + GICR_IGROUPR0,
+                     mmio_read32(sgi + GICR_IGROUPR0) | (1U << maint));
+        mmio_write8(sgi + GICR_IPRIORITYR + maint, 0xA0);
+        mmio_write32(sgi + GICR_ISENABLER0, (1U << maint));
+    }
+
     /* 3b. PL011 UART SPI (INTID 33) in the distributor: Group 1 NS, priority
      *     0xA0, routed to CPU0 (Aff=0), enabled. The guest's ttyAMA0 driver is
      *     interrupt-driven; this physical SPI is taken to EL2 (HCR_EL2.IMO) and

@@ -11,6 +11,7 @@
 #include "../mmu/stage2.h"
 #include <vgic.h>
 #include <vgic_v3_mmio.h>
+#include <vgic_sgi.h>
 
 void vm_arch_init(struct vm *m)
 {
@@ -117,6 +118,7 @@ void vcpu_arch_load(struct vcpu *v)
     __asm__ volatile("isb");
 
     vgic_restore(v);
+    vgic_sgi_drain_vcpu(v);   /* SGIs sent while off-CPU (M11 C T2) */
 }
 
 
@@ -231,6 +233,7 @@ void vcpu_arch_resume(struct vcpu *v)
     SYSREG_WRITE(VMPIDR_EL2, (u64)v->vcpu_idx);
     __asm__ volatile("isb");
     vgic_restore(v);
+    vgic_sgi_drain_vcpu(v);   /* SGIs sent while off-CPU (M11 C T2) */
 }
 
 void vcpu_arch_inject_irq(struct vcpu *v, u32 irq)

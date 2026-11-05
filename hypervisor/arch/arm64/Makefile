@@ -15,6 +15,7 @@ arch-objs := \
     arch/arm64/vmexit/vpsci.o \
     arch/arm64/vgic/vgic.o \
     arch/arm64/vgic/vgic_sgi.o \
+    arch/arm64/vgic/vgic_sgi_place.o \
     arch/arm64/vgic/vgic_v3_mmio.o \
     arch/arm64/irq/gic_v3.o \
     arch/arm64/irq/irq_handler.o \
