@@ -90,7 +90,8 @@ WFE 不生成 configurable trap；**不能把改 HV 的 WFE 分支当成本机�
 
 执行注意：必须分别运行 `make test` 和 `make host-test`。现有 Makefile 对混合目标
 `make test host-test` 的 need-config 判断会误跳过架构配置；本轮发现后分开运行，未扩展
-范围修复这个独立构建问题，不能把那次调用失败当作硬件 gate 失败。
+范围修复这个独立构建问题，不能把那次调用失败当作硬件 gate 失败。触发条件：首个需要
+混合 host/target 顶级目标的自动化入口；在此之前按上述独立命令运行。
 
 ## 专家与验证边界
 
