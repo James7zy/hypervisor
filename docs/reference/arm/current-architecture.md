@@ -1,8 +1,12 @@
 # 当前架构 / Current Architecture（M10，静态双 VM）
 
 > **本文是当前实现的入口。** 描述已经落地并在 QEMU 中验证过的东西：两个 Linux VM，
-> 每个 VM 两个 vCPU，静态 1:1 绑定到各自的 pCPU（4 核 = 2+2），EL2 拥有物理控制台和调试
-> shell；以及 arch 边界重构（ADR-0015）之后的模块划分。
+> 每个 VM 两个 vCPU，EL2 拥有物理控制台和调试 shell；以及 arch 边界重构（ADR-0015）之后的模块划分。
+>
+> **M11 片 C 修订（2026-11-04）**：Linux 演示拓扑为 2×2-on-2——两个 VM 的 vCPU0 共享 pCPU0、
+> vCPU1 共享 pCPU1（`vcpu_pcpu = {0, 1}`），协作式轮转（WFI 让出），pCPU2/3 空闲（`-smp 4`
+> 保留）。跨 VM 切换保存 EL1 集、vGIC、vtimer 与 FP/SIMD（ADR-0019/0020）。下文 §1–§7 的
+> 1:1 描述是 M10 基线，调度器细节以 ADR-0018/0019 与 M11 spec 为准。
 >
 > **不包含：** M11 vCPU 调度器、ACRN 模型（Service VM + 用户态 Device Model，见
 > [目标架构](target-architecture.md)）、任何能运行的第二架构。`arch/x86/` 目前只是一个
@@ -268,8 +272,9 @@ FIFO 有空位做背压）；Ctrl-T 在仲裁层被拦截，不会送达任何�
 
 ## 8. 尚未实现与已知缺陷
 
-- **M11 vCPU 调度器没有实现。** 目前 vCPU 与 pCPU 是静态 1:1，没有 vCPU 上下文切换，也没有
-  FP/SIMD 状态保存（因此全程 `-mgeneral-regs-only`）。
+- **M11 调度器无抢占**（片 C 时点）：协作式，只在 guest `wfi` 处切换；一个忙等的 vCPU 会饿死
+  同 pCPU 上的另一个 VM。抢占 tick 属于片 D。hypervisor 自身仍 `-mgeneral-regs-only`；guest
+  FP/SIMD 由切换路径急切保存（ADR-0020）。
 - **`CPU_OFF` 会杀掉整个 VM**：它与 `SYSTEM_OFF` 共用 `psci_power_down()`，设置的是 per-VM 的
   `vm->off`，没有 per-vCPU 状态。`vm_list` 里显示为 `halted`。M11 会重写这部分状态管理。
 - **`vm_console <n>` 接受已停机的 VM**：焦点切过去后没有任何反应（M10 已知缺口）。

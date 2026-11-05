@@ -84,7 +84,9 @@ const struct vm_config vm_configs[NR_VMS] = {
             .entry = BOARD_LINUX2_IMAGE_PA - BOARD_LINUX2_RAM_PA + BOARD_LINUX_RAM_IPA,
             .mem_base = BOARD_LINUX_RAM_IPA, .ram_pa = BOARD_LINUX2_RAM_PA,
             .mem_size = BOARD_LINUX_RAM_SIZE, .bootinfo_ipa = BOARD_LINUX_DTB_IPA,
-            .vcpu_pcpu = {2, 3},
+            /* 2x2-on-2 (M11 C T7, adjudication 9.2): VM1 shares pCPU0/1
+             * with VM0; pCPU2/3 idle. */
+            .vcpu_pcpu = {0, 1},
             VM_VUART_CONFIG },
 #endif
 };
