@@ -134,6 +134,8 @@ HOST_CC    := cc
 
 all: $(ELF) $(BIN)
 
+-include $(ALL_OBJS:.o=.d)
+
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $< $@
 
@@ -143,11 +145,11 @@ $(ELF): $(ALL_OBJS) $(LD_SCRIPT)
 
 $(OBJ_DIR)/%.o: hypervisor/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
 $(OBJ_DIR)/%.o: hypervisor/%.S
 	@mkdir -p $(dir $@)
-	$(CC) $(ASFLAGS) -c -o $@ $<
+	$(CC) $(ASFLAGS) -MMD -MP -c -o $@ $<
 
 .SECONDARY: $(SVM_BINS:.bin=.elf)
 svm: $(SVM_BINS)
@@ -283,7 +285,9 @@ $(BUILD_DIR)/check_offsets: tests/check_offsets.c
 check-offsets: $(BUILD_DIR)/check_offsets
 	$(BUILD_DIR)/check_offsets
 
-$(BUILD_DIR)/check_offsets_target.o: tests/check_offsets_target.c
+$(BUILD_DIR)/check_offsets_target.o: tests/check_offsets_target.c \
+    hypervisor/include/vm.h hypervisor/include/percpu.h \
+    hypervisor/arch/$(ARCH)/include/arch/vm.h
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
@@ -392,7 +396,7 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-xvm
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-xvm test-qemu-xvm2
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh
