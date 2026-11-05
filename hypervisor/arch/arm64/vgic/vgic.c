@@ -18,10 +18,18 @@
  * more is capped at 4 (QEMU implements exactly 4; RK3588 may give more,
  * using only the first 4 loses nothing correctness-wise, revisit there). */
 static u32 vgic_lr_count;
+static u32 vgic_apr_count;
 
 void vgic_probe(void)
 {
     u64 vtr = SYSREG_READ(ICH_VTR_EL2);
+    /* PreBits, not LR count, determines which AP registers exist. */
+    u32 prebits = (u32)((vtr >> 26) & 7ULL) + 1U;
+    if (prebits < 5U || prebits > 7U) {
+        printk("[hv] BUG: unsupported vGIC preemption bits %u\n", prebits);
+        cpu_arch_halt();
+    }
+    vgic_apr_count = 1U << (prebits - 5U);
     vgic_lr_count = (u32)((vtr & 0x1FULL) + 1ULL);
     if (vgic_lr_count < 4U) {
         printk("[hv] BUG: GIC implements %u LRs < 4 (struct vcpu pins 4)\n",
@@ -54,6 +62,10 @@ void vgic_init(struct vcpu *vcpu)
      * sender's bit may be lost — same as an SGI to a powered-off PE). */
     vcpu->arch.sgi_pending = 0;
     vcpu->arch.timer_ppi_active = false;   /* restore clears a dead owner's */
+    for (u32 i = 0; i < 4U; i++) {
+        vcpu->arch.ich_ap0r[i] = 0;
+        vcpu->arch.ich_ap1r[i] = 0;
+    }
 }
 
 void vgic_inject_sw(struct vcpu *vcpu, u32 vintid, u8 prio)
@@ -203,6 +215,20 @@ void vgic_restore(struct vcpu *vcpu)
 {
     SYSREG_WRITE(ICH_HCR_EL2,  vcpu->arch.ich_hcr_el2);
     SYSREG_WRITE(ICH_VMCR_EL2, vcpu->arch.ich_vmcr_el2);
+    /* An outgoing stop-IPI handler may never EOI. Its running priority
+     * must not mask the incoming VM's pending interrupts. */
+    SYSREG_WRITE(ICH_AP0R0_EL2, vcpu->arch.ich_ap0r[0]);
+    SYSREG_WRITE(ICH_AP1R0_EL2, vcpu->arch.ich_ap1r[0]);
+    if (vgic_apr_count >= 2U) {
+        SYSREG_WRITE(ICH_AP0R1_EL2, vcpu->arch.ich_ap0r[1]);
+        SYSREG_WRITE(ICH_AP1R1_EL2, vcpu->arch.ich_ap1r[1]);
+    }
+    if (vgic_apr_count == 4U) {
+        SYSREG_WRITE(ICH_AP0R2_EL2, vcpu->arch.ich_ap0r[2]);
+        SYSREG_WRITE(ICH_AP1R2_EL2, vcpu->arch.ich_ap1r[2]);
+        SYSREG_WRITE(ICH_AP0R3_EL2, vcpu->arch.ich_ap0r[3]);
+        SYSREG_WRITE(ICH_AP1R3_EL2, vcpu->arch.ich_ap1r[3]);
+    }
     SYSREG_WRITE(ICH_LR0_EL2,  vcpu->arch.ich_lr[0]);
     gic_ppi_set_active(current_vcpu_id(), BOARD_VTIMER_IRQ,
                        vcpu->arch.timer_ppi_active);
@@ -236,6 +262,18 @@ void vgic_save(struct vcpu *vcpu)
 {
     vcpu->arch.ich_hcr_el2  = SYSREG_READ(ICH_HCR_EL2);
     vcpu->arch.ich_vmcr_el2 = SYSREG_READ(ICH_VMCR_EL2);
+    vcpu->arch.ich_ap0r[0] = SYSREG_READ(ICH_AP0R0_EL2);
+    vcpu->arch.ich_ap1r[0] = SYSREG_READ(ICH_AP1R0_EL2);
+    if (vgic_apr_count >= 2U) {
+        vcpu->arch.ich_ap0r[1] = SYSREG_READ(ICH_AP0R1_EL2);
+        vcpu->arch.ich_ap1r[1] = SYSREG_READ(ICH_AP1R1_EL2);
+    }
+    if (vgic_apr_count == 4U) {
+        vcpu->arch.ich_ap0r[2] = SYSREG_READ(ICH_AP0R2_EL2);
+        vcpu->arch.ich_ap1r[2] = SYSREG_READ(ICH_AP1R2_EL2);
+        vcpu->arch.ich_ap0r[3] = SYSREG_READ(ICH_AP0R3_EL2);
+        vcpu->arch.ich_ap1r[3] = SYSREG_READ(ICH_AP1R3_EL2);
+    }
     vcpu->arch.ich_lr[0] = SYSREG_READ(ICH_LR0_EL2);
     vcpu->arch.timer_ppi_active =
         gic_ppi_get_active(current_vcpu_id(), BOARD_VTIMER_IRQ);

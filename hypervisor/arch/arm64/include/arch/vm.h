@@ -95,6 +95,10 @@ struct vcpu_arch {
      * it silenced the next vCPU's timer until the owner came back — forever
      * if the owner was killed (SYSTEM_OFF of the other VM). */
     bool timer_ppi_active;
+    /* Virtual running priorities belong to the vCPU, including an IRQ
+     * handler suspended by a switch or killed before its EOI. */
+    u64 ich_ap0r[4];
+    u64 ich_ap1r[4];
 };
 
 /* Hypervisor callee-saved context, saved by vcpu_arch_run and restored by
