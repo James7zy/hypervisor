@@ -79,6 +79,14 @@ struct vcpu_arch {
      * cross-core under vgic_sgi.c's sgi_lock; drained into LR2/LR3 by the
      * pCPU whose cur_vcpu this is. */
     u16 sgi_pending;
+    /* Guest FP/SIMD context (M11 C T3, ADR-0020 eager): saved at put AND
+     * block, restored at resume/load. Layout bound to fp.S by the pins in
+     * check_offsets_target.c (q at 0, fpsr 512, fpcr 520, size 528). */
+    struct fp_state {
+        u64 q[64];
+        u64 fpsr;
+        u64 fpcr;
+    } __attribute__((aligned(16))) fp;
 };
 
 /* Hypervisor callee-saved context, saved by vcpu_arch_run and restored by

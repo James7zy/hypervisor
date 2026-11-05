@@ -9,6 +9,7 @@
 #include <vm_config.h>
 #include <arch/sysreg.h>
 #include "../mmu/stage2.h"
+#include "fp.h"
 #include <vgic.h>
 #include <vgic_v3_mmio.h>
 #include <vgic_sgi.h>
@@ -102,6 +103,8 @@ void vcpu_arch_load(struct vcpu *v)
     stage2_activate(v);
     __builtin_memset(&v->arch.el1, 0, sizeof(v->arch.el1));
     el1_restore(v);                    /* ends with isb */
+    __builtin_memset(&v->arch.fp, 0, sizeof(v->arch.fp));
+    fp_restore(&v->arch.fp);           /* fresh FP file, not the last resident's */
     __asm__ volatile("tlbi vmalle1\n\tic iallu\n\tdsb nsh\n\tisb"
                      ::: "memory");
 
@@ -180,6 +183,7 @@ void vcpu_arch_put(struct vcpu *v)
      * Same pCPU as the coming resume by construction. EL1 bulk: T4. */
     vgic_save(v);
     el1_save(v);
+    fp_save(&v->arch.fp);
     v->arch.cntv_cval = SYSREG_READ(CNTV_CVAL_EL0);
     v->arch.cntv_ctl  = SYSREG_READ(CNTV_CTL_EL0);
     SYSREG_WRITE(CNTV_CTL_EL0, v->arch.cntv_ctl | (1ULL << 1));  /* IMASK */
@@ -198,6 +202,7 @@ void vcpu_arch_block(struct vcpu *v)
 {
     vgic_save(v);
     el1_save(v);
+    fp_save(&v->arch.fp);   /* switching away from a blocker skips put */
     v->arch.cntv_cval = SYSREG_READ(CNTV_CVAL_EL0);
     v->arch.cntv_ctl  = SYSREG_READ(CNTV_CTL_EL0);
     __asm__ volatile("dsb ish" ::: "memory");
@@ -222,6 +227,7 @@ void vcpu_arch_resume(struct vcpu *v)
      * trailing tlbi purges. Same VM: rewrites the same VTTBR, harmless. */
     stage2_activate(v);
     el1_restore(v);
+    fp_restore(&v->arch.fp);
     /* Flush the INCOMING VMID's stage-1 entries (tlbi vmalle1 targets the
      * VMID now in VTTBR_EL2). Conservative: same-VMID siblings with
      * divergent stage-1 must not see each other's walks either. ASID/VMID-

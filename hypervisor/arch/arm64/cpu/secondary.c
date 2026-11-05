@@ -52,6 +52,7 @@ void secondary_main(u32 id)
      * the boot CPU's el2_mmu_init(); this core only programs its own
      * per-PE MAIR/TCR/TTBR0/SCTLR before touching any MMIO. */
     el2_mmu_enable();
+    SYSREG_WRITE(CPTR_EL2, 0x33FFULL);   /* as cpu_arch_init (M11 C T3) */
 
     const unsigned long rd  = BOARD_GIC_RDIST_BASE + (unsigned long)id * GICR_STRIDE;
     const unsigned long sgi = rd + GICR_SGI_OFFSET;

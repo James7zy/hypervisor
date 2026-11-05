@@ -76,6 +76,58 @@ static void check(int cond, const char *what)
     svm_puts(cond ? what : "CTXSW: CHECK FAILED\n");
 }
 
+/* FP/SIMD canaries (M11 C T3). Built with -mgeneral-regs-only, so the
+ * compiler never allocates v0-v31 or touches FPCR/FPSR: whatever these
+ * stamps leave in the FP file must still be there after any number of
+ * switches, iff the hypervisor saves/restores the FP context. Needs EL1 FP
+ * enabled first (CPACR stamp FPEN=01). Lane value = seed + reg index. */
+static void fp_stamp(unsigned long seed, unsigned long fpcr, unsigned long fpsr)
+{
+    __asm__ volatile(
+        ".irp i,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31\n\t"
+        "add x9, %0, #\\i\n\t"
+        "dup v\\i\\().2d, x9\n\t"
+        ".endr\n\t"
+        "msr fpcr, %1\n\t"
+        "msr fpsr, %2"
+        :: "r"(seed), "r"(fpcr), "r"(fpsr) : "x9", "memory");
+}
+
+/* Mismatching lanes + control registers; 0 == intact. */
+static unsigned long fp_check(unsigned long seed, unsigned long fpcr,
+                              unsigned long fpsr)
+{
+    unsigned long bad;
+    __asm__ volatile(
+        "mov x13, #0\n\t"
+        ".irp i,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31\n\t"
+        "add x12, %1, #\\i\n\t"
+        "mov x10, v\\i\\().d[0]\n\t"
+        "mov x11, v\\i\\().d[1]\n\t"
+        "cmp x10, x12\n\t"
+        "cinc x13, x13, ne\n\t"
+        "cmp x11, x12\n\t"
+        "cinc x13, x13, ne\n\t"
+        ".endr\n\t"
+        "mrs x10, fpcr\n\t"
+        "cmp x10, %2\n\t"
+        "cinc x13, x13, ne\n\t"
+        "mrs x10, fpsr\n\t"
+        "cmp x10, %3\n\t"
+        "cinc x13, x13, ne\n\t"
+        "mov %0, x13"
+        : "=&r"(bad) : "r"(seed), "r"(fpcr), "r"(fpsr)
+        : "x10", "x11", "x12", "x13", "cc");
+    return bad;
+}
+
+#define FP_SEED0 0xE2A0000000000000UL
+#define FP_SEED1 0xF2A0000000000000UL
+#define FPCR0    0x00400000UL          /* RMode = RP */
+#define FPCR1    0x00C00000UL          /* RMode = RZ */
+#define FPSR0    0x1UL                 /* IOC */
+#define FPSR1    0x2UL                 /* DZC */
+
 static volatile unsigned char vcpu1_stack[0x4000] __attribute__((aligned(16), used));
 
 /* Callee-saved bank stamps: these live across the whole switch cycle only
@@ -101,6 +153,7 @@ static void vcpu1_main(void)
             /* SP_EL0/TPIDR_EL0 (slice C T1b): inert under EL1h — full-value. */
             __asm__ volatile("msr sp_el0, %0\n\tmsr tpidr_el0, %1"
                              ::"r"(0xF1E00000UL), "r"(0xF1F00000UL));
+            fp_stamp(FP_SEED1, FPCR1, FPSR1);   /* after CPACR: FPEN=01 */
             /* Timer phase: my deadline is the LONG one. */
             svm_gic_el1_init();
             arm_my_timer(20UL);            /* vCPU0 armed 1/50 */
@@ -124,6 +177,8 @@ static void vcpu1_main(void)
                                  : "=r"(a), "=r"(b));
                 check(a == 0xF1E00000UL && b == 0xF1F00000UL,
                       "CTXSW: v1 sp_el0/tpidr_el0 stamps intact\n");
+                check(fp_check(FP_SEED1, FPCR1, FPSR1) == 0UL,
+                      "CTXSW: v1 fp/simd stamps intact\n");
             }
             {
                 unsigned long mid;
@@ -179,6 +234,7 @@ void SVM_ENTRY _start(void)
           "r"(0xE1B00000UL), "r"(0xE1C00000UL), "r"(0xE1D00000UL));
     __asm__ volatile("msr sp_el0, %0\n\tmsr tpidr_el0, %1"
                      ::"r"(0xE1E00000UL), "r"(0xE1F00000UL));
+    fp_stamp(FP_SEED0, FPCR0, FPSR0);           /* after CPACR: FPEN=01 */
     svm_puts("CTXSW: stamps written (x19-x28)\n");
 
     unsigned long r = svm_hvc4(PSCI_CPU_ON_64, 1UL,
@@ -239,6 +295,8 @@ void SVM_ENTRY _start(void)
                          : "=r"(a), "=r"(b));
         check(a == 0xE1E00000UL && b == 0xE1F00000UL,
               "CTXSW: v0 sp_el0/tpidr_el0 stamps intact\n");
+        check(fp_check(FP_SEED0, FPCR0, FPSR0) == 0UL,
+              "CTXSW: v0 fp/simd stamps intact\n");
     }
     {
         /* Identity (gate-2 Important-4): resume reprograms VMPIDR_EL2 —

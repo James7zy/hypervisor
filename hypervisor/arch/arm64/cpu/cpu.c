@@ -30,6 +30,12 @@ void cpu_arch_init(void)
      */
     SYSREG_WRITE(MDCR_EL2, (1ULL << 8) | (1ULL << 6) | (1ULL << 5));
 
+    /* CPTR_EL2 (M11 C T3): full defined value, never read-modify-write —
+     * the reset value is architecturally UNKNOWN. 0x33FF = the E2H=0 RES1
+     * bits [13:12] and [9:0]; TFP(10)/TTA(20)/TAM(30)/TCPAC(31) clear, so
+     * guest FP/SIMD runs untrapped and eager save/restore owns it. */
+    SYSREG_WRITE(CPTR_EL2, 0x33FFULL);
+
     printk("[hv] Hello from EL2 on %s, CurrentEL=0x%lx\n", board_name,
            SYSREG_READ(CurrentEL));
 
