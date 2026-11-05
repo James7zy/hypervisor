@@ -41,7 +41,14 @@
 | ESR_EL1 / FAR_EL1 | 保存（异常语料） | 保存 | 保存 | 一致 |
 | AMAIR_EL1 | 未保存 | 保存 | 保存 | **差异**：仅影响访问 AMAIR 的调试路径，Linux 默认不读；记为已知缺口（首个消费者出现时补） |
 | PAC 密钥（APIA/APIB/APDA/APDB/APGA） | 未保存 | 保存 | 保存 | **差异**：SVM 用例无 PAuth；Linux gate 在 1:1 不切换；片 C（Linux 共享）前必须补——ADR-0019 已记 |
-| CNTKCTL_EL1 | 未保存 | 保存 | 保存 | **差异**：CNTHCTL 已由 EL2 掌管；EL1 视图在共享场景可能互踩，与 vtimer 重设计（已知缺口）合并处理 |
+| CNTKCTL_EL1 | 保存（片 C T1b 补入） | 保存 | 保存 | 一致（原缺口：触发条件"EL2 背景定时器重设计"在片 C Task 4 发生，提前随 T1b 补齐） |
+| SP_EL0 / TPIDR_EL0 | 保存（片 C T1b 补入） | 保存 | 保存 | 一致；SP_EL0 是 Linux 的 `current`，跨 VM 共享必须保存；ctxsw 已加全值 canary |
+| ELR_EL1 / SPSR_EL1 | 保存（片 C T1b 补入） | 保存 | 保存 | 一致；guest EL1 异常处理中途被切走时的返回现场 |
+| PAR_EL1 | 保存（片 C T1b 补入） | 保存 | 保存 | 一致；AT 指令结果 |
 
 已知缺口三件（AMAIR/PAC/CNTKCTL_EL1）挂 ADR-0019 已知缺口条目，触发条件分别为：
 首个 AMAIR 消费者 / 片 C 共享 Linux / EL2 背景定时器重设计。
+
+> 片 C 修订（2026-11-04，T1b）：CNTKCTL_EL1 已补入保存集，剩 AMAIR 与 PAC 两件；
+> PAC 在片 C 以 TID3 屏蔽 PAuth 特性位处理（Task 6），见 ADR-0019。fresh load 改为
+> 整块清零 EL1 集后走 `el1_restore`，不再只写 `SCTLR_EL1=0`。

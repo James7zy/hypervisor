@@ -65,6 +65,8 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg)
     vgic_init(v);
 }
 
+static void el1_restore(struct vcpu *v);
+
 void vcpu_arch_load(struct vcpu *v)
 {
     /* Blank the per-vCPU virtual interface on every load: every slice-A load
@@ -88,19 +90,27 @@ void vcpu_arch_load(struct vcpu *v)
      * dead context's stage-1 TLB entries and I-cache lines dropped
      * (current VMID only; Stage-2 stays — a sibling vCPU still runs on
      * it). SCTLR_EL1 has no RES1 bits, so 0 is a legal reset value.
+     * M11 C T1b: the WHOLE EL1 set is zeroed and restored (not just SCTLR),
+     * so a fresh load never inherits the previous resident's TTBR/VBAR/
+     * TPIDR/SP_EL0 — under cross-VM sharing that resident is another VM.
      */
     /* Stage-2 FIRST (M11 C, gate-1 adjudication a): VTTBR_EL2 selects the
      * VMID that the tlbi below targets — before this, it still names the
      * OUTGOING VM, and flushing that would leave the incoming VM's stale
      * stage-1 entries live. stage2_activate ends with isb. */
     stage2_activate(v);
-    SYSREG_WRITE(SCTLR_EL1, 0ULL);
-    __asm__ volatile("isb\n\ttlbi vmalle1\n\tic iallu\n\tdsb nsh\n\tisb"
+    __builtin_memset(&v->arch.el1, 0, sizeof(v->arch.el1));
+    el1_restore(v);                    /* ends with isb */
+    __asm__ volatile("tlbi vmalle1\n\tic iallu\n\tdsb nsh\n\tisb"
                      ::: "memory");
 
     /* Per-vCPU virtual timer (M11 B2): offset from the shadow (fresh boot
      * has cntvoff=0/ctl=IMASK from reset); program BEFORE vGIC restore so
      * an armed deadline's PPI paths see the right owner. */
+    /* Fresh load resets the CNTV shadow too (gate-1 A3): a re-ONed vCPU
+     * must not restore the dead context's expired, unmasked deadline. */
+    v->arch.cntv_ctl  = (1ULL << 1);   /* IMASK */
+    v->arch.cntv_cval = 0;
     SYSREG_WRITE(CNTVOFF_EL2, v->arch.cntvoff);
     SYSREG_WRITE(CNTV_CVAL_EL0, v->arch.cntv_cval);
     SYSREG_WRITE(CNTV_CTL_EL0, v->arch.cntv_ctl);
@@ -125,6 +135,12 @@ static void el1_save(struct vcpu *v)
     v->arch.el1.contextidr_el1 = SYSREG_READ(CONTEXTIDR_EL1);
     v->arch.el1.esr_el1        = SYSREG_READ(ESR_EL1);
     v->arch.el1.far_el1        = SYSREG_READ(FAR_EL1);
+    v->arch.el1.sp_el0         = SYSREG_READ(SP_EL0);
+    v->arch.el1.elr_el1        = SYSREG_READ(ELR_EL1);
+    v->arch.el1.spsr_el1       = SYSREG_READ(SPSR_EL1);
+    v->arch.el1.tpidr_el0      = SYSREG_READ(TPIDR_EL0);
+    v->arch.el1.par_el1        = SYSREG_READ(PAR_EL1);
+    v->arch.el1.cntkctl_el1    = SYSREG_READ(CNTKCTL_EL1);
 }
 
 static void el1_restore(struct vcpu *v)
@@ -144,6 +160,12 @@ static void el1_restore(struct vcpu *v)
     SYSREG_WRITE(CONTEXTIDR_EL1, v->arch.el1.contextidr_el1);
     SYSREG_WRITE(ESR_EL1, v->arch.el1.esr_el1);
     SYSREG_WRITE(FAR_EL1, v->arch.el1.far_el1);
+    SYSREG_WRITE(SP_EL0, v->arch.el1.sp_el0);
+    SYSREG_WRITE(ELR_EL1, v->arch.el1.elr_el1);
+    SYSREG_WRITE(SPSR_EL1, v->arch.el1.spsr_el1);
+    SYSREG_WRITE(TPIDR_EL0, v->arch.el1.tpidr_el0);
+    SYSREG_WRITE(PAR_EL1, v->arch.el1.par_el1);
+    SYSREG_WRITE(CNTKCTL_EL1, v->arch.el1.cntkctl_el1);
     SYSREG_WRITE(SCTLR_EL1, v->arch.el1.sctlr_el1);
     __asm__ volatile("isb");
 }

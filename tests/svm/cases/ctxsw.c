@@ -98,6 +98,9 @@ static void vcpu1_main(void)
                 "msr ttbr0_el1, %3\n\tmsr mair_el1, %4\n\tmsr cpacr_el1, %5"
                 ::"r"(0xF1A00000UL + 0), "r"(0xF1A00000UL + 1), "r"(0xF1A00000UL + 2),
                   "r"(0xF1B00000UL), "r"(0xF1C00000UL), "r"(0xF1D00000UL));
+            /* SP_EL0/TPIDR_EL0 (slice C T1b): inert under EL1h — full-value. */
+            __asm__ volatile("msr sp_el0, %0\n\tmsr tpidr_el0, %1"
+                             ::"r"(0xF1E00000UL), "r"(0xF1F00000UL));
             /* Timer phase: my deadline is the LONG one. */
             svm_gic_el1_init();
             arm_my_timer(20UL);            /* vCPU0 armed 1/50 */
@@ -117,6 +120,10 @@ static void vcpu1_main(void)
                       "CTXSW: v1 tpidr/ro/contextidr stamps intact\n");
                 check(d == 0xF1B00000UL && e == 0xF1C00000UL && f == 0xF1D00000UL,
                       "CTXSW: v1 ttbr0/mair/cpacr stamps intact\n");
+                __asm__ volatile("mrs %0, sp_el0\n\tmrs %1, tpidr_el0"
+                                 : "=r"(a), "=r"(b));
+                check(a == 0xF1E00000UL && b == 0xF1F00000UL,
+                      "CTXSW: v1 sp_el0/tpidr_el0 stamps intact\n");
             }
             {
                 unsigned long mid;
@@ -170,6 +177,8 @@ void SVM_ENTRY _start(void)
         "msr ttbr0_el1, %3\n\tmsr mair_el1, %4\n\tmsr cpacr_el1, %5"
         ::"r"(0xE1A00000UL + 0), "r"(0xE1A00000UL + 1), "r"(0xE1A00000UL + 2),
           "r"(0xE1B00000UL), "r"(0xE1C00000UL), "r"(0xE1D00000UL));
+    __asm__ volatile("msr sp_el0, %0\n\tmsr tpidr_el0, %1"
+                     ::"r"(0xE1E00000UL), "r"(0xE1F00000UL));
     svm_puts("CTXSW: stamps written (x19-x28)\n");
 
     unsigned long r = svm_hvc4(PSCI_CPU_ON_64, 1UL,
@@ -226,6 +235,10 @@ void SVM_ENTRY _start(void)
               "CTXSW: v0 tpidr/ro/contextidr stamps intact\n");
         check(d == 0xE1B00000UL && e == 0xE1C00000UL && f == 0xE1D00000UL,
               "CTXSW: v0 ttbr0/mair/cpacr stamps intact\n");
+        __asm__ volatile("mrs %0, sp_el0\n\tmrs %1, tpidr_el0"
+                         : "=r"(a), "=r"(b));
+        check(a == 0xE1E00000UL && b == 0xE1F00000UL,
+              "CTXSW: v0 sp_el0/tpidr_el0 stamps intact\n");
     }
     {
         /* Identity (gate-2 Important-4): resume reprograms VMPIDR_EL2 —
