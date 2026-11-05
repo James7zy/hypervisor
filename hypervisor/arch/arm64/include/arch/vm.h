@@ -64,6 +64,15 @@ struct vcpu_arch {
         u64 contextidr_el1;
         u64 esr_el1;
         u64 far_el1;
+        /* M11 C T1b (gate-1 R1): SP_EL0 is Linux's `current`; ELR/SPSR_EL1
+         * hold an in-flight EL1 exception; CNTKCTL is the guest's EL0
+         * timer-access/event-stream control. */
+        u64 sp_el0;
+        u64 elr_el1;
+        u64 spsr_el1;
+        u64 tpidr_el0;
+        u64 par_el1;
+        u64 cntkctl_el1;
     } el1;
 };
 
