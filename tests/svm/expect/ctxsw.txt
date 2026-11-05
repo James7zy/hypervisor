@@ -23,8 +23,10 @@ SVM HVC: done (x1=0x0)
 CTXSW: v0 tpidr/ro/contextidr stamps intact
 CTXSW: v0 ttbr0/mair/cpacr stamps intact
 CTXSW: v0 sp_el0/tpidr_el0 stamps intact
+CTXSW: v0 fp/simd stamps intact
 CTXSW: v1 tpidr/ro/contextidr stamps intact
 CTXSW: v1 ttbr0/mair/cpacr stamps intact
 CTXSW: v1 sp_el0/tpidr_el0 stamps intact
+CTXSW: v1 fp/simd stamps intact
 CTXSW: v0 MPIDR Aff0 == 0
 CTXSW: v1 MPIDR Aff0 == 1

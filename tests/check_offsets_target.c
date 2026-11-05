@@ -35,8 +35,8 @@ _Static_assert(offsetof(struct vcpu, arch.ich_lr)        == 0x130,          "ich
 /* Generic-tail field (M11 slice A): NOT read by exception-entry asm, but
  * pinned here so a field insertion that pushes it (or a migration of it into
  * the asm-visible prefix) fails the build instead of silently drifting. */
-_Static_assert(offsetof(struct vcpu, state)              == 0x21C,          "vcpu.state offset mismatch");
-_Static_assert(offsetof(struct vcpu, launched)            == 0x220,          "vcpu.launched offset mismatch");
+_Static_assert(offsetof(struct vcpu, state)              == 0x42C,          "vcpu.state offset mismatch");
+_Static_assert(offsetof(struct vcpu, launched)            == 0x430,          "vcpu.launched offset mismatch");
 /* EL1 bulk set (M11 B2 T4): generic-tail adjacency, whole-block pin. */
 _Static_assert(offsetof(struct vcpu, arch.el1)             == 0x178,          "el1 block offset mismatch");
 _Static_assert(sizeof(((struct vcpu *)0)->arch.el1)        == 0x90,           "el1 block size mismatch");
@@ -44,6 +44,12 @@ _Static_assert(sizeof(((struct vcpu *)0)->arch.el1)        == 0x90,           "e
 _Static_assert(offsetof(struct vcpu, arch.cntvoff)         == 0x160,          "cntvoff offset mismatch");
 _Static_assert(offsetof(struct vcpu, arch.cntv_ctl)        == 0x168,          "cntv_ctl offset mismatch");
 _Static_assert(offsetof(struct vcpu, arch.cntv_cval)       == 0x170,          "cntv_cval offset mismatch");
+/* FP block (M11 C T3): fp.S hard-codes these; arch.fp at 0x210 (16-aligned). */
+_Static_assert(offsetof(struct vcpu, arch.fp)              == 0x210,          "fp block offset mismatch");
+_Static_assert(sizeof(struct fp_state)                   == 528,            "fp_state size mismatch");
+_Static_assert(offsetof(struct fp_state, q)              == 0,              "fp_state.q offset mismatch");
+_Static_assert(offsetof(struct fp_state, fpsr)           == 512,            "fp_state.fpsr offset mismatch");
+_Static_assert(offsetof(struct fp_state, fpcr)           == 520,            "fp_state.fpcr offset mismatch");
 _Static_assert(offsetof(struct hv_ctx, lr)          == HV_LR,          "HV_LR mismatch");
 _Static_assert(offsetof(struct hv_ctx, sp)          == HV_SP,          "HV_SP mismatch");
 _Static_assert(sizeof(struct hv_ctx)                == HV_CTX_SIZE,    "HV_CTX_SIZE mismatch");

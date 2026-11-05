@@ -149,6 +149,10 @@ $(BUILD_DIR)/svm/svm-%.elf: tests/svm/cases/%.c $(SVM_COMMON) tests/svm/svm_lib.
 	$(CC) $(SVM_CFLAGS) -Wl,--no-warn-rwx-segments -T tests/svm/svm.lds \
 	      -o $@ $< $(SVM_COMMON)
 
+# FP canaries are trustworthy only if the compiler never touches v0-v31
+# (M11 C T3).
+$(BUILD_DIR)/svm/svm-ctxsw.elf: SVM_CFLAGS += -mgeneral-regs-only
+
 $(BUILD_DIR)/svm/svm-%.bin: $(BUILD_DIR)/svm/svm-%.elf
 	$(OBJCOPY) -O binary $< $@
 
