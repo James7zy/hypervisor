@@ -12,14 +12,17 @@
  *   +0    VM0 v0 (pCPU0): CPU_ON vCPU1 -> pCPU1, arms CNTV for +900, wfi
  *         -> BLOCKED. VM1 v0 (pCPU0): CPU_ON vCPU1 -> pCPU1, then busy-waits
  *         (it must be RUNNING when it SYSTEM_OFFs at +700).
- *   +0    VM0 v1 (pCPU1): every 100 ms: arm CNTV, wfi, ticks++.
+ *   +0    VM0 v1 (pCPU1): arms CNTV for +900 (the same deadline as v0 —
+ *         while off-CPU only the EL2 background timer covers it), wfi.
  *         VM1 v1 (pCPU1): busy-waits to +700, then yields forever.
  *   +700  VM1 v0: SYSTEM_OFF -> both VM1 vCPUs swept to OFF; VM1 v1 is
  *         RUNNING on pCPU1, so it is kicked and unwinds (T6).
  *   +900  VM0 v0's timer fires (its own CNTV, or the EL2 background timer
  *         while it was off-CPU). It samples vCPU1's tick counter, waits on
- *         its own timer to +1200, samples again.
- *   +1200 verdict: vCPU1 — sharing pCPU1 with the killed VM until now —
+ *         its own timer to +1500, samples again. vCPU1 starts its 100 ms
+ *         tick loop from the +900 wake, so the window under test is
+ *         entirely after the sweep.
+ *   +1500 verdict: vCPU1 — sharing pCPU1 with the killed VM until now —
  *         must have been woken by its own timer at least once after the
  *         sweep. A survivor left stranded on pCPU1 (lost wake / bad
  *         cross-VM resume) shows up as a frozen counter.
@@ -88,8 +91,9 @@ void svm_irq_handler(void)
         else
             v1_ticks++;
     }
+    /* EOImode=0: EOIR already deactivates. No ICC_DIR write — it traps to
+     * EL2 (unhandled) and its printk would interleave with guest lines. */
     __asm__ volatile("msr ICC_EOIR1_EL1, %0" :: "r"(iar));
-    __asm__ volatile("msr ICC_DIR_EL1, %0"   :: "r"(iar));
     __asm__ volatile("isb");
 }
 
@@ -111,6 +115,12 @@ static void secondary_main(void)
 {
     svm_gic_el1_init();
     __asm__ volatile("msr daifclr, #2");
+    /* First deadline coincides with VM0 v0's: it is the one that has to
+     * survive the SYSTEM_OFF at +700 — while off-CPU it is only covered by
+     * the EL2 background timer (T4). */
+    __asm__ volatile("msr CNTV_CVAL_EL0, %0" :: "r"(t_start + ms(900)));
+    __asm__ volatile("msr CNTV_CTL_EL0, %0\n\tisb" :: "r"(1UL));
+    __asm__ volatile("wfi");
     for (;;) {
         __asm__ volatile("msr CNTV_CVAL_EL0, %0" :: "r"(now() + ms(100)));
         __asm__ volatile("msr CNTV_CTL_EL0, %0\n\tisb" :: "r"(1UL));
@@ -134,15 +144,24 @@ void SVM_ENTRY _start(void)
     while (!timer0)
         __asm__ volatile("wfi");             /* BLOCKED until +900 */
 
-    unsigned long ticks_before = v1_ticks;
-    __asm__ volatile("msr CNTV_CVAL_EL0, %0" :: "r"(t_start + ms(1300)));
-    __asm__ volatile("msr CNTV_CTL_EL0, %0\n\tisb" :: "r"(1UL));
-    while (!timer0)
-        __asm__ volatile("wfi");             /* +1300 */
+    /* Detector (M11 C): vCPU1 shares pCPU1 with the VM that was just
+     * killed. Once stranded it stays stranded, so require progress in FIVE
+     * consecutive 100 ms windows rather than one sample — a single lost
+     * wake must not be able to pass. */
+    unsigned long last = v1_ticks;
+    int stalled = 0;
+    for (int w = 0; w < 5; w++) {
+        __asm__ volatile("msr CNTV_CVAL_EL0, %0" :: "r"(now() + ms(100)));
+        __asm__ volatile("msr CNTV_CTL_EL0, %0\n\tisb" :: "r"(1UL));
+        while (!timer0)
+            __asm__ volatile("wfi");
+        if (v1_ticks == last)
+            stalled++;
+        last = v1_ticks;
+    }
 
     svm_puts("XVM2: v0 alive after VM1 SYSTEM_OFF\n");
-    /* The detector: vCPU1 shares pCPU1 with the VM that was just killed. */
-    check(v1_ticks > ticks_before,
+    check(stalled == 0,
           "XVM2: v1 kept taking its own timer after VM1 SYSTEM_OFF\n");
     svm_done(0);
 }
@@ -151,7 +170,9 @@ void SVM_ENTRY _start(void)
 void SVM_ENTRY _start(void)
 {
     t_start = now();
-    busy_until(t_start + ms(20));
+    /* Staggered by 40 ms against VM0's +20 prints: the vuart TX path is
+     * byte-serial and two guests printing at once garble both lines. */
+    busy_until(t_start + ms(60));
     svm_puts("XVM2: VM1 start\n");
     unsigned long r = svm_hvc4(PSCI_CPU_ON_64, 1UL,
                                (unsigned long)xvm2_secondary_entry, 0UL);
