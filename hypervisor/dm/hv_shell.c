@@ -150,7 +150,7 @@ static void cmd_vm_list(const char *arg)
         bool focused = (i == console_focus);
         bool any_on = false;
         for (u32 j = 0U; j < (u32)VCPUS_PER_VM; j++) {
-            if (m->vcpu[j].state != VCPU_OFF)
+            if (__atomic_load_n(&m->vcpu[j].state, __ATOMIC_ACQUIRE) != VCPU_OFF)
                 any_on = true;
         }
         const char *state = any_on ? "on" : "halted";

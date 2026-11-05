@@ -58,7 +58,7 @@ void el2_irq_handler(void)
          * here, which such a pCPU never takes; gate-1 A1).
          */
         struct vcpu *cv = current_vcpu();
-        if (cv == NULL || cv->state == VCPU_OFF) {
+        if (cv == NULL || __atomic_load_n(&cv->state, __ATOMIC_ACQUIRE) == VCPU_OFF) {
             if (cpu_arch_this_percpu()->idle_window) {
                 /* Reached via the current-EL vector from the idle window:
                  * parking here bricks the pCPU against future CPU_ONs and

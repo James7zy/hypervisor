@@ -36,7 +36,7 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
 
     u32 idx  = (u32)aff;                    /* VM-local vCPU index */
     struct vcpu *v = &m->vcpu[idx];
-    if (v->state != VCPU_OFF)
+    if (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) != VCPU_OFF)
         return PSCI_RET_ALREADY_ON;         /* percpu[].online is now the
                                                physical fact, not this check */
 
@@ -119,12 +119,8 @@ static void psci_system_off_vm(const char *what)
 
     for (u32 idx = 0; idx < (u32)VCPUS_PER_VM; idx++) {
         struct vcpu *v = &m->vcpu[idx];
-        bool was_running = (v->state == VCPU_RUNNING);
-
-        if (v->state == VCPU_OFF)
-            continue;
-        (void)vcpu_state_step(&v->state, VCPU_EV_OFF);
-        if (was_running) {
+        enum vcpu_state old = vcpu_state_stop(&v->state);
+        if (old == VCPU_RUNNING) {
             u32 pcpu = m->config->vcpu_pcpu[idx];
             if (pcpu == caller_pcpu)
                 continue;
@@ -192,7 +188,7 @@ static u64 psci_affinity_info(struct arch_regs *regs)
     if ((target_aff & ~0xFFULL) != 0ULL || aff >= (u64)VCPUS_PER_VM)
         return PSCI_RET_INVALID_PARAMETERS;
 
-    switch (m->vcpu[(u32)aff].state) {
+    switch (__atomic_load_n(&m->vcpu[(u32)aff].state, __ATOMIC_ACQUIRE)) {
     case VCPU_ON_PENDING:
         return PSCI_AFF_LEVEL_ON_PENDING;
     case VCPU_RUNNABLE:
