@@ -200,6 +200,11 @@ guest 轮询只得到 1023）。
    live LR0 处于 active 且指向 vtimer，就在其 pCPU 上 deactivate 物理 PPI 27 一次；
 3. 用 xvm2 + 手工 Linux 门禁验证（计时器 + 控制台两处）。
 
+**该修法也试过（实验，未合入）**：删掉 `vgic_restore` 的物理 Active 强制写、
+在 `vgic_init` 里对"上一个驻留者留下 Active"做一次性 deactivate —— xvm2 仍然红（1/3 组，
+与基线相同）。所以"Active 被固化"也不足以解释：**即便不写 Active，pending 的 HW=1 LR0
+依旧无法交付**。
+
 已试过并排除（含本轮）：忙等（不 block）仍红 → 排除 block/wake 路径；直接轮询 IAR 拿到 1023
 → 排除 IRQ 异常/向量路径；正是这两条把矛头指向"物理 Active 被固化"。
 
