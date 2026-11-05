@@ -54,7 +54,14 @@ const struct vm_config vm_configs[NR_VMS] = {
      */
     [1] = { .vmid = 2, .entry = BOARD_SVM_ENTRY, .mem_base = BOARD_SVM_MEM_BASE,
             .ram_pa = BOARD_SVM2_RAM_PA, .mem_size = BOARD_SVM_MEM_SIZE,
-            .bootinfo_ipa = 0, .vcpu_pcpu = {2, 3},
+            .bootinfo_ipa = 0,
+#ifdef CONFIG_SVM_XVM
+            /* Cross-VM isolation profile (M11 C T5): VM1 vCPU1 shares
+             * pCPU0 with VM0 vCPU0 (tests/svm/cases/xvm.c). */
+            .vcpu_pcpu = {2, 0},
+#else
+            .vcpu_pcpu = {2, 3},
+#endif
             VM_VUART_CONFIG },
 #endif
 };
