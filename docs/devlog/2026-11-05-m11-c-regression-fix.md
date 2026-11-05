@@ -1,6 +1,7 @@
 # M11 片 C 回归修复：活动优先级、resident 与并发停止
 
-> 状态：开发中，尚未交测试专家复验；不进入片 D。
+> 状态：开发侧验收完成，可交测试专家复验；保留已定位的启动饥饿限制，不进入片 D。
+> 尚未正式复验/关卡②/合入；Linear H-27 待授权同步。
 > 关联：[定位记录](../debug/m11-c-survivor-freeze.md)、
 > [片 C plan](../superpowers/plans/2026-11-04-m11-slice-c-cross-vm-fp.md)、
 > [本轮报告](../reports/2026-11-05-m11-c-regression-fix.md)。
@@ -62,7 +63,7 @@ Kernel panic - not syncing: Oops: Fatal exception in interrupt
 ```
 
 这把 IABT 与 switch-in 失败后的 resident 串用直接对应起来。修复 resident 后连续 6 次
-Linux gate 通过；最终全部修改后的干净树验收尚待执行。
+Linux gate 通过；最终代码 `86e8ad3` 在干净树上又完成两轮全量 gate 与 Linux 三连，见报告。
 
 ## 启动挂死：已定位，保留明确限制
 
@@ -86,5 +87,6 @@ IAR 必须返回 spurious（priority 仍 active）。把 AP 恢复临时改为�
 
 本轮不是正式测试专家复验或架构师关卡②。AP 的 6/7 位硬件分支、RK3588 真机尚未运行；
 异步 stop 不承诺 OFF 发布瞬间零 guest 指令，并发 CPU_ON 的完整生命周期协议不在本轮。
-全量 `make test` 已通过 10 个 QEMU 场景；最终干净树 Linux 三连与 Linear 收尾仍待完成。
+最终干净树：`make test` 两次均 10 场景通过；host 两次均 195＋20 断言与 500000 轮竞争通过；
+Linux gate 连续三次通过。有限次绿色不消除已定位的协作等待饥饿。
 当前会话没有可用 Linear CLI / 工具或环境授权，未对远端 H-27 作更新。
