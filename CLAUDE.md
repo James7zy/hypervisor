@@ -53,15 +53,21 @@ RK3588, with AMD/Intel x86-64 (AMD SVM / Intel VT-x) as the second architecture.
 today; `arch/x86/` is a link-check stub. Inspired by ACRN, Xvisor and bao; the directory layout
 mirrors ACRN's `hypervisor/`.
 
-**Current state (M10, gate-verified 2026-07-20)**: two Linux VMs, two vCPUs each,
-statically pinned 1:1 to pCPUs (2+2 on 4), EL2-owned console and shell; no scheduler
-yet. The long-term target is the full ACRN model (Service VM + userspace Device
-Model). The milestone roadmap and its execution tracking live in
-[Linear](https://linear.app/jamestam/project/hypervisor-3b151b91cb63)
-(阶段0 = M0–M10 completed; 阶段1–9 = M11 prerequisites → M16). When starting M11,
-read the
+**Current state**: two Linux VMs on QEMU `virt`, EL2-owned console and shell; the
+scheduler work merged as slices A/B1/B2/C but not yet accepted. The long-term target
+is the full ACRN model (Service VM + userspace Device Model).
+
+**The roadmap lives only in Linear**:
+[Hyper project](https://linear.app/jamestam/project/hyper-4cbc13150332) — 4 capability
+milestones (CPU / 内存 / 中断 / 设备) over a 56-item requirement list, executed in the
+H1 → H2 → S1 → D1 order recorded in the project description. Do not restate or re-plan
+the roadmap in this repo; track progress there, not here.
+
+`M0`–`M16` in this repo are **historical names** (ADR-0016/0017, spec and devlog file
+names), not the plan. The work once called M11 is `HV-003`. When starting scheduler
+work, read the
 [arch-boundary alignment](docs/superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md)
-together with the original scheduler design rather than restoring its old paths.
+together with the original design rather than restoring its old paths.
 
 **Design principle:** small, fast iterations; break work into the smallest practical,
 clearly defined units; high cohesion, low coupling. Each milestone gets a spec in
@@ -69,9 +75,14 @@ clearly defined units; high cohesion, low coupling. Each milestone gets a spec i
 
 ## 验证
 
-- **硬件验收 gate**：`make test`（4 项静态检查 + 7 个 QEMU 场景，ADR-0009；分钟级）。
+- **硬件验收 gate**：`make test`（4 项静态检查 + 10 个 QEMU 场景，ADR-0009；分钟级）。
 - **纯逻辑改动**：`make host-test`（host gcc 直接编译同一份源文件，秒级；tests/host/，
   ADR-0009 2026-10-30 修订）。不并入 `make test`，gate 语义不变。
+
+## 提交信息（commit）
+
+格式与范例见 [docs/reference/commit-conventions.md](docs/reference/commit-conventions.md)：
+`type(scope): subject` 标题 + 正文 + `Test:` / `Bug:` / `Fixed:` 尾部标签。
 
 ## Where knowledge lives
 

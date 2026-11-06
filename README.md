@@ -21,10 +21,11 @@ The generic code reaches the architecture only through `*_arch_*` hooks and
 `<arch/...>` headers, enforced by `make test`; the x86 stub is linked on every
 `make test` to prove the generic code builds for a second architecture.
 
-M0–M10 are done; the milestone roadmap and execution tracking live in
-[Linear](https://linear.app/jamestam/project/hypervisor-3b151b91cb63)
-(阶段0 = M0–M10 completed; 阶段1–9 = M11 prerequisites → M16). Ordering
-rationale: [ADR-0016](docs/adr/0016-acrn-model-roadmap-decisions.md),
+The roadmap and its execution tracking live only in Linear
+([Hyper project](https://linear.app/jamestam/project/hyper-4cbc13150332)):
+4 capability milestones over a 56-item requirement list. `M0`–`M16` in this repo are
+historical names, not the plan. Ordering rationale behind them:
+[ADR-0016](docs/adr/0016-acrn-model-roadmap-decisions.md),
 [ADR-0017](docs/adr/0017-el2-hardening-before-scheduler-and-passthrough-milestone.md).
 
 > Historical specs and ADRs use old milestone numbers (renumbered 2026-08-10) —
