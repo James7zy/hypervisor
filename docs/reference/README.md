@@ -17,6 +17,9 @@
 
 ## 通用(根目录)
 
+- [commit-conventions.md](commit-conventions.md) — **提交信息规范**:`type(scope): subject`
+  标题 + 正文 + `Test:` / `Bug:` / `Fixed:` 尾部标签,参考 Fuchsia 的 commit message style
+  并按本工程调整(无 Gerrit,不写 `Change-Id:`)。`CLAUDE.md` §提交信息指向这里。
 - [superpowers.md](superpowers.md) — Claude Code 本地 skills 与 pi 项目包的
   Superpowers 安装、使用、验证与更新；Claude 不使用插件，不全局启用。
 - [mermaid-gotchas.md](mermaid-gotchas.md) — Mermaid 避坑清单:如何用
@@ -64,6 +67,9 @@
   分发；arch 解码与 common MMIO 总线的职责边界、错误处理和当前限制。
 - [arm/vgic-injection.md](arm/vgic-injection.md) — 四种注入与 LR0/1/2 分工；timer
   HW 转发、SPI 锁与 pending 发布、远程 kick；为什么现有 save/restore 不能直接用于调度。
+- [arm/atomics-and-cas.md](arm/atomics-and-cas.md) — **CAS / 独占访问笔记**：LSE `CAS*` 与
+  `LDXR/STXR` 两条路径的取舍，acquire/release 后缀与 `DMB` vs `DSB` 的区别，六个只在真机暴露的坑；
+  附本仓库为什么手写 `ldxr/stxr` 而不用 `__atomic_*`(outline atomics)。
 - [arm/vgic-debug-logging.md](arm/vgic-debug-logging.md) — `CONFIG_DEBUG_VGIC` 的开启、
   当前 3 个打印点（GICD/GICR + timer HW 注入）及诊断限制；没有 SPI/SGI 日志点。
 

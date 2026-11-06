@@ -5,9 +5,10 @@
 > io_req 环）、M14（Device Model + virtio 后端）、M15（RK3588 移植）。截至 M10，
 > 下面图里的 Device Model、HSM、virtio 后端、SMMU 隔离**都还不存在**。
 >
-> **当前实现**见 [current-architecture.md](current-architecture.md)：M10 静态分区与
-> 已完成的 arch 边界重构，**不包含 M11 调度器**。里程碑与编号映射见
-> [Linear 路线图](https://linear.app/jamestam/project/hypervisor-3b151b91cb63)。
+ > **当前实现**见 [current-architecture.md](current-architecture.md)：静态分区与
+> 已完成的 arch 边界重构，**不含调度器的验收收口**（对应 Linear `HV-003`）。
+> 路线图见 [Linear Hyper 项目](https://linear.app/jamestam/project/hyper-4cbc13150332)；
+> 标题里的 `M12–M15` 是历史命名，不是计划。
 >
 > 本文的两张图原先是 `CLAUDE.md` 里的 ASCII 大图，2026-09-14 迁出并改用 Mermaid 重画
 > （`CLAUDE.md` 要求架构文档配 Mermaid 图）。x86 基座的对位版本见
@@ -179,6 +180,6 @@ flowchart TD
   重画，附术语对照表（EL2↔VMX root、Stage-2↔EPT、vGICv3↔vLAPIC、PSCI↔ACPI）。
 - [[../../adr/0014-multi-vm-static-partition-el2-console]] — M10 的多 VM 静态分区、
   per-VM Stage-2/vGIC、EL2 独占控制台。
-- [Linear Hypervisor 项目](https://linear.app/jamestam/project/hypervisor-3b151b91cb63) — M0–M16 里程碑路线图与执行追踪。
+- [Linear Hyper 项目](https://linear.app/jamestam/project/hyper-4cbc13150332) — 唯一的路线图：4 个能力面里程碑 + 56 条需求。
 - [ADR-0016](../../adr/0016-acrn-model-roadmap-decisions.md) — ACRN 模型的路线图排序决策。
 - [ADR-0015](../../adr/0015-arch-boundary-core-vs-arch.md) — 已落地的 core/arch 边界。
