@@ -41,6 +41,22 @@ memory（`qemu-toolchain-env`）。Linux `Image`、BusyBox initramfs、guest DTB
   「计数非零且在走」。要对齐上轮口径需加忙等 workload 复跑。
 - **6/7 位 AP 分支、RK3588 真机**未实跑（沿用上轮结论）。
 
+## 关卡②（架构师 review，2026-11-06）
+
+**裁定：PASS，无阻塞问题。** 已 ff-only 线性合入 `dev`（合并顶点 `0e57a20`；dev == 复验树，
+三 gate 证据直接继承）。
+
+Review 范围：`dev..feature/m11-c-survivor-fix` 共 15 提交（12 修复/测试 + 3 docs）。三个修复
+（AP 上下文、状态机原子化、resident 记账）实现正确；构建一致性（-MMD/-MP、offsets 头依赖、
+`-mno-outline-atomics`）正确；测试覆盖充分（host sched_test、race 50 万轮、ctxsw active-IRQ、
+xvm2 stop-IPI 已入 `make test`）；ADR-0019 决定 8/9/10 与已知缺口更新到位。
+
+非阻塞观察（不要求修复）：
+- PreBits < 5 直接 fail-stop；RK3588 实跑时验证（ADR 已知缺口）。
+- `tests/run_linux_xvm_test.py` 是独立 Linux gate 驱动、未接入 Makefile。
+- 3 个 docs 提交（gitignore / 路线图对齐 / 复验记录）随合并一起走，无代码影响。
+
 ## 下一步
 
-架构师关卡② review → 线性合回 `dev`（→ `origin/develop`）→ 片 D 抢占（H-174 正解入口）。
+片 D 抢占（H-174 正解入口）：单独切片，先 spec + plan 走关卡①。`dev` 本地 ahead 28，
+远端 `origin/develop` 推送由用户决定（本轮已确认不推送）。
