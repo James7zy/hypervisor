@@ -28,9 +28,15 @@ build/
 !.claude/skills/
 .claude/skills/*
 
+# Local MCP server config (per-user workspace setup)
+.mcp.json
+
 # Pi project package caches (declarations live in .pi/settings.json)
 .pi/git/
 .pi/npm/
+.pi/goals/
+.pi/.goals-pool-snapshot.json
+.pi/mcp.json
 
 # Vendored agent skills (installed tooling, not project code)
 .agents/
