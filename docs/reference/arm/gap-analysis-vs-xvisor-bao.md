@@ -16,7 +16,7 @@
 
 ## 1. 缺口总表
 
-“已排”一栏对应 ADR-0017 和 [Linear 路线图](https://linear.app/jamestam/project/hypervisor-3b151b91cb63)。
+“已排”一栏对应 ADR-0017 和 [Linear 路线图](https://linear.app/jamestam/project/hyper-4cbc13150332)。
 
 | # | 缺口 | 本仓库现状（已核实） | 为什么要紧 | 参考入口 | 已排 |
 |---|---|---|---|---|---|
