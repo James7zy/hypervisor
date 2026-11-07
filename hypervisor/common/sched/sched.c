@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: TBD */
 #include <sched.h>
-#include <cpu.h>            /* cpu_arch_idle */
+#include <cpu.h>            /* cpu_arch_idle, cpu_arch_timer_tick_arm */
 #include <vm_config.h>   /* vcpu_pcpu[] affinity */
 #include <sched_q.h>
 #include <percpu.h>
@@ -10,6 +10,21 @@
  * SCHED_Q_MAX entries each — trivial next to struct vm. */
 static struct sched_q  queues[NR_CPUS];
 static struct spinlock q_lock[NR_CPUS];
+
+/* Per-pCPU preemption request (slice D). Written from the timer's IRQ
+ * context on this pCPU, consumed at the top of sched_loop. */
+static u32 preempt_req[NR_CPUS];
+
+void sched_preempt_request(void)
+{
+    __atomic_store_n(&preempt_req[current_vcpu_id()], 1u, __ATOMIC_RELEASE);
+}
+
+bool sched_preempt_take(void)
+{
+    return __atomic_exchange_n(&preempt_req[current_vcpu_id()], 0u,
+                               __ATOMIC_ACQ_REL) != 0u;
+}
 
 void sched_init(void)
 {
@@ -73,6 +88,16 @@ void sched_loop(u32 pcpu)
 
     for (;;) {
         struct vcpu *v;
+        /* Quantum expired (slice D): the tick's handler only set the flag
+         * and unwound via hv_restore, leaving prev RUNNING. Convert it here
+         * — the same VCPU_EV_YIELD path a WFI yield takes, so every state
+         * transition keeps going through vcpu_state_step — and queue it.
+         * The pick below then rotates it behind whoever else is waiting. */
+        if (sched_preempt_take() && prev != NULL &&
+            __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNING) {
+            if (vcpu_state_step(&prev->state, VCPU_EV_YIELD) == 0)
+                sched_yield_cur();
+        }
         if (prev != NULL &&
             __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNING) {
             /* Unwind without a state change (HC_GUEST_DONE park; a timer
@@ -146,6 +171,11 @@ void sched_loop(u32 pcpu)
                     continue;
             }
         }
+        /* Arm the next quantum right before the guest entry: this covers
+         * switch-in and a self re-pick; the RUNNING fast path above inherits
+         * the deadline it already has (re-arming it would restart the
+         * quantum on every trap-free unwind). */
+        cpu_arch_timer_tick_arm();
         vcpu_arch_run(v);
     }
 }

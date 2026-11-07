@@ -18,4 +18,8 @@ void el2_timer_rearm(void);
  * re-arm. Masked EL2 IRQ context. */
 void vtimer_bg_expire(void);
 
+/* True when this pCPU's preemption quantum deadline has passed; consumes it
+ * (el2_timer_rearm then programs the background deadline alone). */
+bool vtimer_tick_expire(void);
+
 #endif /* HV_VTIMER_H */

@@ -46,6 +46,10 @@ void cpu_arch_kick(u32 pcpu)
     (void)pcpu;
 }
 
+void cpu_arch_timer_tick_arm(void)
+{
+}
+
 void vm_arch_init(struct vm *m)
 {
     (void)m;

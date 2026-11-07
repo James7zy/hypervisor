@@ -10,6 +10,7 @@
 #include <types.h>
 #include <printk.h>
 #include <arch/sysreg.h>
+#include <cpu.h>
 #include <vtimer.h>
 #include <vm.h>
 #include <vm_config.h>
@@ -112,4 +113,27 @@ void vtimer_bg_expire(void)
         }
     }
     el2_timer_rearm();   /* woken ones are no longer BLOCKED: next earliest or off */
+}
+
+bool vtimer_tick_expire(void)
+{
+    u32 me = current_vcpu_id();
+    u64 now = SYSREG_READ(CNTPCT_EL0);
+
+    if (tick_deadline[me] == ~0ULL || tick_deadline[me] > now)
+        return false;
+    tick_deadline[me] = ~0ULL;   /* consumed: el2_timer_rearm is bg-only now */
+    return true;
+}
+
+void cpu_arch_timer_tick_arm(void)
+{
+    u64 freq = SYSREG_READ(CNTFRQ_EL0);
+    u64 now  = SYSREG_READ(CNTPCT_EL0);
+
+    if (freq == 0)
+        return;   /* no readable timebase (architecturally impossible): run unpreempted */
+    /* ms -> counts at runtime; freq*MS cannot overflow (freq <= 1 GHz). */
+    tick_deadline[current_vcpu_id()] = now + freq * SCHED_QUANTUM_MS / 1000u;
+    el2_timer_rearm();
 }
