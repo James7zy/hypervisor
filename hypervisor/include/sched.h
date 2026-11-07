@@ -19,6 +19,13 @@ _Static_assert(NR_VMS * VCPUS_PER_VM <= SCHED_Q_MAX,
 
 struct vcpu;
 
+/* Preemption quantum (M11 slice D): the EL2 tick preempts a running vCPU
+ * after this much time on the pCPU, so two RUNNING/RUNNABLE vCPUs on one
+ * pCPU make progress without either yielding. 10 ms @ 100 Hz: safe on QEMU
+ * TCG and real hardware alike. The arch derives it from CNTFRQ_EL0 at
+ * runtime (no hard-coded frequency). */
+#define SCHED_QUANTUM_MS 10
+
 void          sched_init(void);             /* build + fill NR_CPUS queues */
 struct vcpu  *sched_pick(u32 pcpu);         /* rotate out the next; NULL if idle */
 void          sched_yield_cur(void);        /* re-enqueue the current vCPU */
@@ -31,5 +38,11 @@ bool          sched_idle_may_sleep(u32 pcpu);
 /* The scheduler run loop both pCPUs drop into after their bring-up (M11 B2
  * hoist; noreturn). */
 void          sched_loop(u32 pcpu) __attribute__((noreturn));
+
+/* Preemption request flag, per pCPU (M11 slice D). The timer's IRQ context
+ * only raises it and unwinds — state conversion, queueing and the switch
+ * must stay in sched_loop (one path through vcpu_state_step). */
+void          sched_preempt_request(void);
+bool          sched_preempt_take(void);   /* clear-and-test, in sched_loop */
 
 #endif /* HV_SCHED_H */

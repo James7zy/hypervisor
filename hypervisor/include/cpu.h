@@ -36,4 +36,11 @@ void cpu_arch_irq_disable(void);
  * x86 = IPI, RISC-V = software-interrupt IPI. */
 void cpu_arch_kick(u32 pcpu);
 
+/* Arm this pCPU's next SCHED_QUANTUM_MS preemption tick and reprogram the
+ * physical timer (sched_loop calls it before every guest entry). Portability:
+ * x86 = VMX preemption timer or LAPIC timer, RISC-V = SBI timer (ADR-0015).
+ * The deadline itself belongs to the arch timer module; the generic layer
+ * knows only that a quantum has to be re-armed. */
+void cpu_arch_timer_tick_arm(void);
+
 #endif /* HV_CPU_H */

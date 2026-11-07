@@ -20,10 +20,12 @@ static int resume_a_count;
  * RUN_PREEMPT: the quantum tick unwinds A via hv_restore, so run() simply
  * returns with A still RUNNING and the loop must do the rest. */
 static bool preempt_mode;
+static int tick_arm_count;
 
 void cpu_arch_irq_enable(void) {}
 void cpu_arch_irq_disable(void) {}
 void cpu_arch_kick(u32 cpu) { (void)cpu; }
+void cpu_arch_timer_tick_arm(void) { tick_arm_count++; }
 void cpu_arch_idle(void)
 {
     TEST_ASSERT(0);  /* A must not be stranded. */
@@ -59,6 +61,7 @@ void vcpu_arch_run(struct vcpu *v)
     TEST_ASSERT(v == resident);
     if (++run_count == 2)
         longjmp(finished, 1);
+    TEST_ASSERT(tick_arm_count == run_count);   /* a fresh quantum per entry */
     if (preempt_mode) {
         /* The tick handler: flag request + unwind, no state change here. */
         sched_preempt_request();
@@ -81,7 +84,7 @@ static void preempt_case(void)
         vm[i].vcpu[0].launched = true;
     }
     resident = NULL;
-    run_count = resume_a_count = 0;
+    run_count = resume_a_count = tick_arm_count = 0;
     percpu[0].cur_vcpu = NULL;
     preempt_mode = true;
     sched_init();
@@ -104,7 +107,7 @@ int main(void)
             vm[i].vcpu[0].launched = (i == 0) || launched;
         }
         resident = NULL;
-        run_count = resume_a_count = 0;
+        run_count = resume_a_count = tick_arm_count = 0;
         percpu[0].cur_vcpu = NULL;
         sched_init();
         if (!setjmp(finished))

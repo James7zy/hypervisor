@@ -138,12 +138,24 @@ void el2_irq_handler(void)
         gic_priority_drop(intid);
         gic_deactivate(intid);
     } else if (intid == BOARD_HYP_TIMER_IRQ) {
-        /* EL2 background timer (M11 C T4): level-triggered on CNTHP, so
+        /* EL2 timer (M11 C T4) plus the preemption quantum (slice D):
+         * level-triggered on CNTHP, so consume the expired deadline and
          * re-program (or stop) it BEFORE drop+deactivate, or it re-fires at
          * once. Never HW-forwarded: no guest owns this timer. */
-        vtimer_bg_expire();
+        bool tick = vtimer_tick_expire();
+        vtimer_bg_expire();   /* wakes expired sleepers, rearms min(...) */
         gic_priority_drop(intid);
         gic_deactivate(intid);
+        if (tick && !cpu_arch_this_percpu()->idle_window) {
+            /* Quantum over: flag only. Converting the vCPU, queueing it and
+             * picking the next all belong to sched_loop (one state-machine
+             * path) — this context only unwinds. Inside the idle window
+             * there is NO guest register file on the hardware, so
+             * hv_restore would load a stale one: return and let the loop
+             * re-check its queue instead. */
+            sched_preempt_request();
+            hv_restore();   /* noreturn: sched_loop consumes the flag */
+        }
     } else if (intid == BOARD_PL011_IRQ) {
         /*
          * PL011 RX: EL2 owns the physical UART exclusively (M5 slice 2).
