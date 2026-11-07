@@ -54,7 +54,8 @@ today; `arch/x86/` is a link-check stub. Inspired by ACRN, Xvisor and bao; the d
 mirrors ACRN's `hypervisor/`.
 
 **Current state**: two Linux VMs on QEMU `virt`, EL2-owned console and shell; the
-scheduler work merged as slices A/B1/B2/C but not yet accepted. The long-term target
+scheduler work (slices A/B1/B2/C/D, 10 ms time-slice preemption on the shared pCPU)
+merged into `dev`, gates green, milestone acceptance still open. The long-term target
 is the full ACRN model (Service VM + userspace Device Model).
 
 **The roadmap lives only in Linear**:
@@ -75,7 +76,9 @@ clearly defined units; high cohesion, low coupling. Each milestone gets a spec i
 
 ## 验证
 
-- **硬件验收 gate**：`make test`（4 项静态检查 + 10 个 QEMU 场景，ADR-0009；分钟级）。
+- **硬件验收 gate**：`make test`（4 项静态检查 + 11 个 QEMU 场景，ADR-0009；分钟级）。
+  真实 Linux 门禁 `make test-linux`（双 VM 到 shell，前置校验镜像 sha256）是切片关卡②
+  与里程碑验收的固定项，不进 `make test` 聚合（ADR-0009 2026-11-07 修订）。
 - **纯逻辑改动**：`make host-test`（host gcc 直接编译同一份源文件，秒级；tests/host/，
   ADR-0009 2026-10-30 修订）。不并入 `make test`，gate 语义不变。
 
