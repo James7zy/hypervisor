@@ -57,9 +57,9 @@ flowchart LR
 
 **DoD**:
 - [ ] `tests/host/sched_q_test.c` RED→GREEN commit 顺序可见。
-- [ ] 同 VM 2 vCPU on 1 pCPU 协作轮转，`ctxsw`（场景 8/8）全绿，含挂起中断跨让出存活。
-- [ ] `docs/debug/` 新增半清单失败模式 + 对照差异各一篇。
-- [ ] ADR×2 落档：两层状态划分；协作先行与 WFI 让出点。
+- [x] 同 VM 2 vCPU on 1 pCPU 协作轮转，`ctxsw`（场景 8/8）全绿，含挂起中断跨让出存活。
+- [x] `docs/debug/` 新增半清单失败模式 + 对照差异各一篇。
+- [x] ADR×2 落档：两层状态划分；协作先行与 WFI 让出点。
 
 **合并标准（关卡②）**: 聚合 8 场景全绿 + host 全绿 + 手工双 VM Linux gate（默认拓扑仍
 2+2-on-4 不变）+ per-exception 开销不变（汇编路径零改动，评审确认）。
@@ -71,10 +71,10 @@ flowchart LR
 `-mgeneral-regs-only` 不变量不解除）。
 
 **DoD**:
-- [ ] 新双 VM 共享隔离场景（同 IPA 各盖各值，切换后读回）全绿。
-- [ ] `ctxsw` FP 盖章段通过；双 VM 并发 FP 负载结果正确。
-- [ ] 手工 2×2-on-2 Linux gate：两 shell、Ctrl-T、timer/IPI 计数在走。
-- [ ] ADR×1 落档：急切先于惰性 FP（显式推迟 `CPTR_EL2.TFP`）。
+- [x] 新双 VM 共享隔离场景（同 IPA 各盖各值，切换后读回）全绿。
+- [x] `ctxsw` FP 盖章段通过；双 VM 并发 FP 负载结果正确。
+- [x] 手工 2×2-on-2 Linux gate：两 shell、Ctrl-T、timer/IPI 计数在走。
+- [x] ADR×1 落档：急切先于惰性 FP（显式推迟 `CPTR_EL2.TFP`）。
 
 **合并标准（关卡②）**: 聚合全绿（含新场景）+ 隔离断言红不了（测试专家对抗性构造一次
 跨 VM 泄漏尝试并记录）+ TLB 免失效优化登记为带条件的推迟项。
@@ -85,11 +85,15 @@ flowchart LR
 `make test-linux`（聚合外）+ ADR-0009 显式重访；镜像来源按裁定 9.1 落地（脚本化获取
 + 固定哈希）。
 
-**DoD**:
-- [ ] 抢占下聚合全绿；两 VM 前向进度并发可观察（非仅无损坏）。
-- [ ] `make test-linux` 一条命令绿到双 shell；ADR-0009 修订落档。
-- [ ] 里程碑收尾：known gaps 盘点、`CLAUDE.md` 里程碑表更新、
-  `docs/reference/arm/current-architecture.md` 更新、Linear 同步。
+**DoD**（2026-11-07 完成，分支 `feature/m11-d-preemption` `181110c..af98bd9`）:
+- [x] 抢占下聚合全绿；两 VM 前向进度并发可观察（非仅无损坏）：新增 `preempt` 场景（11/11），
+  共享 pCPU 两 vCPU 都不 WFI，靠 tick 轮转；受控红在 `docs/debug/2026-11-07-m11-d-preempt-controlled-red.md`。
+- [x] `make test-linux` 一条命令绿到双 shell（`63e136c`，镜像 sha256 前置校验）；ADR-0009 修订落档。
+- [x] 里程碑收尾：known gaps 盘点入 ADR-0019/0021、`CLAUDE.md` 现状段与验证节、
+  `docs/reference/arm/current-architecture.md` 更新（计划原文的"`CLAUDE.md` 里程碑表"已随路线图
+  迁到 Linear 而失效，改为更新现状段）；Linear 同步按用户指示暂停，待办入当日报告。
+- 实现哈希：`1650497`（CNTHP 单写点）`03ea974`+`e9c5a6e`（抢占 RED/GREEN）`9cbf96d`（gate 场景）
+  `63e136c`（test-linux）`af98bd9`（路径引号）。测试专家复验：`docs/reports/2026-11-07-m11-d-verification.md`。
 
 **合并标准（关卡②）**: 里程碑验收场景（2×2-on-2 双 VM + 并发 FP 到 shell）绿 + 三份
 ADR 在档 + 源文档三篇无未标注冲突。
@@ -100,3 +104,8 @@ ADR 在档 + 源文档三篇无未标注冲突。
 - Linear：M11 开工时 H-27 置 In Progress 并挂本 plan 链接；H-167（vmexit 计数器）保持
   M11 范围外，收尾时复核归属。
 - 每片完成后在本文对应节勾选 DoD 并补 commit 哈希（沿用前置 A/B plan 的收尾惯例）。
+
+**片 D 收尾状态（2026-11-07）**：A/B1/B2/C/D 四片代码全部在 `dev`，`make host-test`、
+`make test`（11 场景）、`make test-linux`（双 VM 到 shell）三套 gate 绿；
+ADR-0018/0019/0020/0021 在档，ADR-0009 已修订。**待用户侧**：Linear H-27 状态同步
+（用户指示暂停）与里程碑接受；RK3588 真机、6/7 位 AP 分支、FP 并发 workload 仍为已知验证边界。

@@ -5,6 +5,13 @@
 > arch-neutral 源文件跑纯逻辑单测（tests/host/，零依赖）。本 ADR 的三步 gate
 > 语义不变，仍是强制验收；host 层是它的下一级快速反馈，不是替代。
 > "Considered Options" 里"值得在有可移植逻辑后重访"的条件自此兑现。
+>
+> **2026-11-07:** 硬件验收拆成两层，第三步"run + observe"被它们取代：
+> `make test`（4 项静态检查 + 11 个 QEMU 场景，分钟级，不需要外部镜像）是每次改动的
+> 常规门；`make test-linux`（双 VM 真实 Linux 到 shell，前置校验镜像 sha256，单次约
+> 10 s–2 min）是切片关卡②与里程碑验收的固定项，**不进** `make test` 聚合（ADR-0016
+> 的"可复现验证"靠脚本 + 固定哈希落地，大二进制不入库）。原文"no automated suite"
+> 的前提已经过期：自动化门禁存在，只是仍为本地形态、无 CI。
 
 A bare-metal EL2 hypervisor is awkward to unit-test: most of its behaviour is
 only observable on real (or emulated) ARM hardware after a context switch into a

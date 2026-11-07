@@ -91,7 +91,9 @@ flowchart TB
   在 resume/load 末尾编程为"亲和本核、BLOCKED、非当前"vCPU 中 `ENABLE=1 && IMASK=0`
   者的最早物理期限 `cntv_cval + cntvoff`；到期 `sched_wake`，resume 恢复其已过期的
   CNTV 使 PPI 27 重新触发。选型：单 CNTHP 取最早期限（v8.0 无 CNTHV）；片 D 抢占 tick
-  复用同一定时器，取 min(tick, 最早期限)。不新增通用层钩子。
+  复用同一定时器，取 min(tick, 最早期限)（**2026-11-07 落地**：通用层只多一个
+  `cpu_arch_timer_tick_arm()` 钩子，装定时刻由 `sched_loop` 给；deadline 与唯一重编程点
+  `el2_timer_rearm()` 都在 arch timer 模块内，没有新增定时器抽象）。
 - ~~**共享 profile 跨 vCPU SGI 缺口**~~（**片 C T2 修复**）：`sgi_pending[]` 按 pCPU
   键控，共享时误投当前 vCPU。原记"片 C 的 2×2-on-2 每 VM 仍 1:1，不受影响"为**误判**：
   键是 pCPU 而非 (VM, vCPU)，跨 VM 共享一个 pCPU 时发给 VM1 vCPU0 的 SGI 会注入当时在跑
@@ -113,14 +115,13 @@ flowchart TB
   `ctl=IMASK, cval=0`，同时整块清零 EL1 集与 FP 文件（ADR-0020）。
 - ~~1:1 profile 下 put/resume/EL1 路径从不执行~~（**片 C T7**）：Linux 演示拓扑已翻到
   2×2-on-2，切换路径在真实负载下执行；跨 VM 覆盖面另有 xvm 场景（T5）。
-- **共享 pCPU 的协作等待饥饿（2026-11-05 已定位，未修复）**：旧 HV focused boot probe
-  14 次中 1 次出现 VM0 stop-machine 与 VM1 同步 IPI 等待环；各自所需的对端在另一
-  pCPU 队列中。QEMU 9.2.4 不产生 WFE configurable trap（实际 trace 的 WFx=0），
-  因此不能靠 TWE 解除等待。无条件 kick 轮转也被架构诊断否决：可能换下刚收到 IPI
-  的 current，消费唯一通知后形成另一个等待环。本轮用户范围是定位启动问题、不进入 D：
-  保留 `wfe_wait` 非 gate 诊断；处理归既定片 D 的抢占/公平性设计，进入 D 时必须以此
-  rendezvous 回归作为验收输入。**当前仍不能保证任意 Linux 启动都成功**，不得用有限
-  次绿色宣称此缺口消失。目标关联的通知调度若提前实施，须另行明确批准协议。
+- ~~**共享 pCPU 的协作等待饥饿**~~（**片 D 修复，2026-11-07**）：旧症状是 VM0 stop-machine
+  与 VM1 同步 IPI 的等待环各自所需的对端排在同一个 pCPU 队列里，宿住者不让出就不闭合；
+  QEMU 9.2.4 不产生 WFE configurable trap（trace WFx=0），TWE 不可用；无条件 kick 轮转
+  会消费掉唯一通知，故不采用。现由 10 ms 时间片 tick 强制轮转（ADR-0021）：确定性回归
+  `tests/svm/cases/preempt.c` 进 `make test` 聚合（无 tick 时受控红在档），`wfe_wait.c`
+  降级为诊断。**验证边界**：Linux 门禁 2026-11-07 连跑 5 次全绿，但上一轮口径是 14 次中
+  1 次真实挂死，有限次绿不证明该现象消失；抢占只在 QEMU `cortex-a72` 验证，RK3588 未跑。
 - **异步 stop / re-ON 的验证上限**：OFF exchange 与 LOAD CAS 已线性化，但没有 stop ack，
   不保证 OFF 发布瞬间零 guest 指令，也未验证完整并发 CPU_ON 生命周期。触发 = 首个需要
   同步销毁或立即复用停止 vCPU 资源的消费者；届时先明确静止确认协议，不能仅凭 OFF 状态复用。

@@ -28,10 +28,17 @@ initramfs 起两个真实 VM，验证 2×2-on-2 共享拓扑下 vtimer、跨 VM 
    ```sh
    mkdir -p /tmp/ir/{bin,dev,proc,sys,etc,tmp}
    cp ../busybox/busybox /tmp/ir/bin/busybox
-   cd /tmp/ir/bin && for a in sh ash hush mount cat echo mdev mknod sync poweroff reboot sleep dd ls ps; do ln -sf busybox "$a"; done
+   cd /tmp/ir/bin && ./busybox --install -s .   # 全部 applet 软链，见下方 2026-11-07 修订
    cd /tmp/ir && cp <repo>/guest/initramfs-init.sh init && chmod +x init
    find . | cpio -o -H newc | gzip -9 > /tmp/initramfs.cpio.gz
    ```
+
+   > **2026-11-07 修订（片 D 发现）**：原来此处枚举 `sh ash hush mount cat echo mdev mknod
+   > sync poweroff reboot sleep dd ls ps`，漏了 `make test-linux` 驱动需要的 `grep` 与
+   > `taskset`——按那份清单重建出来的镜像跑到幸存者阶段就红（`taskset: not found`）。
+   > 改为 `busybox --install -s`（软链只占目录项），不再枚举。也因此：**2026-11-06 报告
+   > 里"三 gate 全绿"那一次用的镜像不是这份配方产出的 `addf42a`**，两者不是同一个文件；
+   > 当天结论在引擎上仍成立，但该段的口径以本修订为准。
 
 3. guest DTB + hypervisor ELF：
 

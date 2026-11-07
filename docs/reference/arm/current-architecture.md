@@ -1,4 +1,4 @@
-# 当前架构 / Current Architecture（M10，静态双 VM）
+# 当前架构 / Current Architecture（M10 基线，调度器已到 M11 片 D）
 
 > **本文是当前实现的入口。** 描述已经落地并在 QEMU 中验证过的东西：两个 Linux VM，
 > 每个 VM 两个 vCPU，EL2 拥有物理控制台和调试 shell；以及 arch 边界重构（ADR-0015）之后的模块划分。
@@ -8,7 +8,12 @@
 > 保留）。跨 VM 切换保存 EL1 集、vGIC、vtimer 与 FP/SIMD（ADR-0019/0020）。下文 §1–§7 的
 > 1:1 描述是 M10 基线，调度器细节以 ADR-0018/0019 与 M11 spec 为准。
 >
-> **不包含：** M11 vCPU 调度器、ACRN 模型（Service VM + 用户态 Device Model，见
+> **M11 片 D 修订（2026-11-07）**：协作轮转之上加了 10 ms 时间片抢占。tick 与背景 vtimer
+> 共用 CNTHP（PPI 26），`el2_timer_rearm()` 是唯一重编程点，取 min(量子到期, 背景最早期限)；
+> 中断上下文只置旗标并 `hv_restore()` 解栈，RUNNING→RUNNABLE 与入队发生在 `sched_loop`
+> （ADR-0021）。一个不让出的 vCPU 不再能饿死同 pCPU 的他者。
+>
+> **不包含：** ACRN 模型（Service VM + 用户态 Device Model，见
 > [目标架构](target-architecture.md)）、任何能运行的第二架构。`arch/x86/` 目前只是一个
 > 链接检查 stub（`make test-x86-stub`），证明通用代码能编译和链接，**不能运行**。
 >
@@ -261,10 +266,10 @@ FIFO 有空位做背压）；Ctrl-T 在仲裁层被拦截，不会送达任何�
 
 | 头文件 | 钩子 |
 |---|---|
-| `include/cpu.h` | `cpu_arch_init` `cpu_arch_halt` `cpu_arch_power_on` |
+| `include/cpu.h` | `cpu_arch_init` `cpu_arch_halt` `cpu_arch_power_on` `cpu_arch_idle` `cpu_arch_kick` `cpu_arch_irq_enable` `cpu_arch_irq_disable` `cpu_arch_timer_tick_arm` |
 | `include/percpu.h` | `cpu_arch_this_percpu` `cpu_arch_set_this_percpu`（内联，在 `<arch/percpu.h>`） |
 | `include/spinlock.h` | `atomic_arch_fetch_inc_u32` `cpu_arch_relax`（内联，在 `<arch/spinlock.h>`） |
-| `include/vm.h` | `vm_arch_init` `vm_arch_devices_init` `vcpu_arch_reset` `vcpu_arch_load` `vcpu_arch_run` `vcpu_arch_inject_irq` |
+| `include/vm.h` | `vm_arch_init` `vm_arch_devices_init` `vcpu_arch_reset` `vcpu_arch_load` `vcpu_arch_run` `vcpu_arch_inject_irq` `vcpu_arch_put` `vcpu_arch_block` `vcpu_arch_resume` |
 
 没有 weak 默认实现：缺钩子在链接时就失败，`arch/x86/stub/hooks.c` 就是靠这一点做第二道
 检查的。新增钩子时要同时补 x86 stub，并在
@@ -272,9 +277,10 @@ FIFO 有空位做背压）；Ctrl-T 在仲裁层被拦截，不会送达任何�
 
 ## 8. 尚未实现与已知缺陷
 
-- **M11 调度器无抢占**（片 C 时点）：协作式，只在 guest `wfi` 处切换；一个忙等的 vCPU 会饿死
-  同 pCPU 上的另一个 VM。抢占 tick 属于片 D。hypervisor 自身仍 `-mgeneral-regs-only`；guest
-  FP/SIMD 由切换路径急切保存（ADR-0020）。
+- **调度器已带抢占（M11 片 D，2026-11-07）**：10 ms 量子，`CNTHP` 到期后由 `sched_loop`
+  换下（ADR-0021）；协作 WFI 让出仍是常态路径。hypervisor 自身仍 `-mgeneral-regs-only`；
+  guest FP/SIMD 由切换路径急切保存（ADR-0020）。已知边界：量子固定、无优先级（只保证
+  前向进度，不保证时延）；掩中断构型只在 QEMU 验证（真机 M15）。
 - **`CPU_OFF` 会杀掉整个 VM**：它与 `SYSTEM_OFF` 共用 `psci_power_down()`，设置的是 per-VM 的
   `vm->off`，没有 per-vCPU 状态。`vm_list` 里显示为 `halted`。M11 会重写这部分状态管理。
 - **`vm_console <n>` 接受已停机的 VM**：焦点切过去后没有任何反应（M10 已知缺口）。
