@@ -123,7 +123,7 @@ void vcpu_arch_load(struct vcpu *v)
 
     vgic_restore(v);
     vgic_sgi_drain_vcpu(v);   /* SGIs sent while off-CPU (M11 C T2) */
-    vtimer_bg_arm();          /* an off-CPU sleeper may have just appeared (T4) */
+    el2_timer_rearm();        /* an off-CPU sleeper's deadline, or the quantum (T4/D) */
 }
 
 
@@ -198,7 +198,7 @@ void vcpu_arch_put(struct vcpu *v)
  * targets cur_vcpu == this blocked owner, sched_wake requeues. Once this
  * pCPU switches ANOTHER vCPU in, the live CNTV is the newcomer's; the
  * sleeper's deadline is then covered by the EL2 background timer
- * (vtimer_bg_arm at resume/load, M11 C T4). */
+ * (el2_timer_rearm at resume/load, M11 C T4). */
 void vcpu_arch_block(struct vcpu *v)
 {
     vgic_save(v);
@@ -241,7 +241,7 @@ void vcpu_arch_resume(struct vcpu *v)
     __asm__ volatile("isb");
     vgic_restore(v);
     vgic_sgi_drain_vcpu(v);   /* SGIs sent while off-CPU (M11 C T2) */
-    vtimer_bg_arm();          /* an off-CPU sleeper may have just appeared (T4) */
+    el2_timer_rearm();        /* an off-CPU sleeper's deadline, or the quantum (T4/D) */
 }
 
 void vcpu_arch_inject_irq(struct vcpu *v, u32 irq)
