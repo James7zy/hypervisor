@@ -438,9 +438,9 @@ test-linux:
 	    echo "ERROR: image hash != $(LINUX_GATE_SHA) -- rebuild both images per $(LINUX_GATE_HELP)"; \
 	    exit 1; }
 	$(MAKE) BUILD_DIR=$(LINUX_BUILD_DIR) HV_GUEST=linux all guest
-	$(LINUX_GATE_ENV) LINUX_IMAGE=$(LINUX_IMAGE) LINUX_INITRD=$(LINUX_INITRD) \
+	$(LINUX_GATE_ENV) LINUX_IMAGE="$(LINUX_IMAGE)" LINUX_INITRD="$(LINUX_INITRD)" \
 	    python3 tests/run_linux_xvm_test.py --self-test
-	$(LINUX_GATE_ENV) LINUX_IMAGE=$(LINUX_IMAGE) LINUX_INITRD=$(LINUX_INITRD) \
+	$(LINUX_GATE_ENV) LINUX_IMAGE="$(LINUX_IMAGE)" LINUX_INITRD="$(LINUX_INITRD)" \
 	    python3 tests/run_linux_xvm_test.py
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
