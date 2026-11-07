@@ -1,7 +1,10 @@
 /* SPDX-License-Identifier: TBD */
 /* Diagnostic only: QEMU 9.2.4 does not trap WFE. On svm_ctxsw's shared
  * pCPU the queued secondary cannot run: expect an external timeout after
- * CPU_ON, not DONE. See docs/debug/m11-c-survivor-freeze.md. Not a gate. */
+ * CPU_ON, not DONE. See docs/debug/m11-c-survivor-freeze.md. Not a gate.
+ * Superseded by the `preempt` gate case (M11 slice D), which covers the same
+ * starvation shape with a spin instead of WFE; kept as an independent
+ * diagnostic, deliberately NOT in `test`. */
 #include "../svm_lib.h"
 
 static volatile int ready;

@@ -119,7 +119,7 @@ SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -fno-pic -fno-pie \
               -Wall -Wextra -Werror -O2 -g
 # Bare-metal SVM test guests: one shared runtime, one binary per case
 # (tests/svm/cases/<case>.c -> $(BUILD_DIR)/svm/svm-<case>.bin).
-SVM_CASES  := basic vtimer vm1 traps psci ctxsw
+SVM_CASES  := basic vtimer vm1 traps psci ctxsw preempt
 SVM_BINS   := $(SVM_CASES:%=$(BUILD_DIR)/svm/svm-%.bin)
 SVM_COMMON := tests/svm/svm_lib.c tests/svm/svm_vectors.S
 
@@ -128,7 +128,7 @@ HOST_CC    := cc
 .PHONY: all run clean defconfig menuconfig help svm check-offsets host-test check-arch-boundary \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
 	test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell \
-	test-qemu-ctxsw test-x86-stub test guest
+	test-qemu-ctxsw test-qemu-preempt test-x86-stub test guest
 
 .NOTPARALLEL: test
 
@@ -196,6 +196,17 @@ test-qemu-ctxsw:
 	LINUX_IMAGE= HYPERVISOR_ELF=$(CTXSW_BUILD_DIR)/hypervisor.elf \
 	SVM_BIN=$(CTXSW_BUILD_DIR)/svm/svm-ctxsw.bin \
 	sh tests/run_svm_test.sh tests/svm/expect/ctxsw.txt
+
+# M11 slice D preemption gate: the same shared-pCPU profile as ctxsw, but
+# neither vCPU ever yields — WITHOUT the EL2 tick the run times out with
+# vCPU1 unscheduled (H-174 starvation, ADR-0019; controlled red in
+# docs/debug/2026-11-07-m11-d-preempt-controlled-red.md).
+PREEMPT_BUILD_DIR := build/test-preempt
+test-qemu-preempt:
+	$(MAKE) BUILD_DIR=$(PREEMPT_BUILD_DIR) HV_GUEST=svm_ctxsw all svm
+	LINUX_IMAGE= HYPERVISOR_ELF=$(PREEMPT_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(PREEMPT_BUILD_DIR)/svm/svm-preempt.bin \
+	sh tests/run_svm_test.sh tests/svm/expect/preempt.txt
 
 # M11 slice C cross-VM isolation on a shared pCPU: one source, one image per
 # VM (vspi precedent), FP-canary-safe flags.
@@ -396,7 +407,7 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-xvm test-qemu-xvm2
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-preempt test-qemu-xvm test-qemu-xvm2
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh
