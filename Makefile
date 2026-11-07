@@ -128,7 +128,7 @@ HOST_CC    := cc
 .PHONY: all run clean defconfig menuconfig help svm check-offsets host-test check-arch-boundary \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
 	test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell \
-	test-qemu-ctxsw test-qemu-preempt test-x86-stub test guest
+	test-qemu-ctxsw test-qemu-preempt test-linux test-x86-stub test guest
 
 .NOTPARALLEL: test
 
@@ -408,6 +408,40 @@ test-x86-stub:
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
 test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-preempt test-qemu-xvm test-qemu-xvm2
+
+# Linux gate (slice D): two real Linux VMs on the 2x2-on-2 shared-pCPU
+# topology in one command. The Image and the initramfs are BUILD PRODUCTS
+# (steps: docs/devlog/2026-11-06-linux-gate-rebuild.md) and their sha256 is
+# pinned in tests/linux-gate.sha256 so a stale or different pair cannot pass
+# silently: line 1 is the Image, line 2 the initramfs (the paths inside the
+# pin file are informational -- LINUX_IMAGE/LINUX_INITRD are what gets
+# checked, so both stay overridable). NOT in `test`: it needs the two images
+# on disk, which a fresh checkout does not have.
+LINUX_IMAGE     ?= $(HOME)/Music/virtual/linux-6.12.103/arch/arm64/boot/Image
+LINUX_INITRD    ?= /tmp/initramfs.cpio.gz
+LINUX_GATE_SHA  := tests/linux-gate.sha256
+LINUX_BUILD_DIR ?= build/test-linux
+LINUX_GATE_ENV  := HYPERVISOR_ELF=$(LINUX_BUILD_DIR)/hypervisor.elf \
+                   GUEST_DTB=$(LINUX_BUILD_DIR)/guest/guest.dtb \
+                   GUEST_DTB1=$(LINUX_BUILD_DIR)/guest/guest-vm1.dtb
+LINUX_GATE_HELP := docs/devlog/2026-11-06-linux-gate-rebuild.md
+
+test-linux:
+	@for f in "$(LINUX_IMAGE)" "$(LINUX_INITRD)"; do \
+	    if [ ! -f "$$f" ]; then \
+	        echo "ERROR: $$f not found -- build it per $(LINUX_GATE_HELP)"; \
+	        exit 1; \
+	    fi; \
+	done
+	@awk 'NR==1{print $$1 "  $(LINUX_IMAGE)"} NR==2{print $$1 "  $(LINUX_INITRD)"}' \
+	    $(LINUX_GATE_SHA) | sha256sum -c - || { \
+	    echo "ERROR: image hash != $(LINUX_GATE_SHA) -- rebuild both images per $(LINUX_GATE_HELP)"; \
+	    exit 1; }
+	$(MAKE) BUILD_DIR=$(LINUX_BUILD_DIR) HV_GUEST=linux all guest
+	$(LINUX_GATE_ENV) LINUX_IMAGE=$(LINUX_IMAGE) LINUX_INITRD=$(LINUX_INITRD) \
+	    python3 tests/run_linux_xvm_test.py --self-test
+	$(LINUX_GATE_ENV) LINUX_IMAGE=$(LINUX_IMAGE) LINUX_INITRD=$(LINUX_INITRD) \
+	    python3 tests/run_linux_xvm_test.py
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh
