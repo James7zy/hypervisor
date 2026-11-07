@@ -16,8 +16,18 @@
 #include <percpu.h>
 #include <sched.h>
 
+/* Per-pCPU preemption quantum deadline (M11 slice D). CNTPCT value; ~0ULL
+ * means "no quantum armed". Owned here, never in struct percpu: PERCPU_SIZE
+ * and the asm offsets stay untouched. */
+static u64 tick_deadline[NR_CPUS];
+
 void vtimer_init(void)
 {
+    /* Idempotent, and must cover every pCPU: BSS zero is NOT "no deadline"
+     * (a zero CVAL fires at once), and secondaries read their own slot. */
+    for (u32 p = 0; p < (u32)NR_CPUS; p++)
+        tick_deadline[p] = ~0ULL;
+
     /* CNTVOFF_EL2 is per-vCPU since M11 B2 (vcpu_arch load/resume program
      * it from the shadow); only the EL1 access trap control is global. */
     SYSREG_WRITE(CNTHCTL_EL2, 0x3ULL);   /* EL1PCTEN | EL1PCEN */
@@ -62,10 +72,13 @@ static bool bg_deadline(const struct vcpu *v, u64 *dl)
     return true;
 }
 
-void vtimer_bg_arm(void)
+void el2_timer_rearm(void)
 {
-    u64 earliest = ~0ULL;
-    bool any = false;
+    /* Start from this pCPU's quantum deadline: min(background, tick) in one
+     * place, so a switch-in rearm cannot wipe the tick (the failure mode
+     * this function exists to prevent). */
+    u64 earliest = tick_deadline[current_vcpu_id()];
+    bool any = earliest != ~0ULL;
 
     for (u32 i = 0; i < (u32)NR_VMS; i++) {
         for (u32 j = 0; j < (u32)VCPUS_PER_VM; j++) {
@@ -98,5 +111,5 @@ void vtimer_bg_expire(void)
                 sched_wake(v);   /* resume restores its expired CNTV: PPI 27 re-raises */
         }
     }
-    vtimer_bg_arm();   /* woken ones are no longer BLOCKED: next earliest or off */
+    el2_timer_rearm();   /* woken ones are no longer BLOCKED: next earliest or off */
 }

@@ -7,10 +7,12 @@
  * offset (CNTVOFF_EL2=0). Must be called before vm_run(). */
 void vtimer_init(void);
 
-/* EL2 background timer (M11 C T4): program this pCPU's CNTHP to the
- * earliest virtual-timer deadline among its OFF-CPU BLOCKED vCPUs (or stop
- * it). Call on this pCPU after switching a vCPU in. */
-void vtimer_bg_arm(void);
+/* Program this pCPU's CNTHP to min(background vtimer earliest deadline,
+ * preemption quantum deadline) — or stop it. THE ONLY writer of
+ * CNTHP_CVAL/CTL: anything arming a deadline must go through here, or the
+ * other deadline silently disappears. Call on this pCPU after switching a
+ * vCPU in. */
+void el2_timer_rearm(void);
 
 /* CNTHP PPI: wake every off-CPU blocked vCPU whose deadline passed, then
  * re-arm. Masked EL2 IRQ context. */
