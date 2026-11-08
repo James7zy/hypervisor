@@ -54,7 +54,7 @@ static s64 hc_vm_query(struct vm *caller, u64 a1, u64 a2, u64 *ret)
     struct vm *target;
     (void)a2;
 
-    if (a1 > 0xFFFFULL)   /* vmid occupies bits[15:0] of the answer */
+    if (a1 >> HC_VMID_BITS != 0U)   /* vmid occupies bits[15:0] of the answer */
         return HC_ENODEV;
     target = vm_by_id((u32)a1);
     if (target == NULL)

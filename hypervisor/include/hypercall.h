@@ -36,11 +36,16 @@ struct vm;
 #define HC_GUEST_DONE   HC_ID(HC_MOD_GENERIC, 1)
 #define HC_VM_QUERY     HC_ID(HC_MOD_VM, 0)
 
+/* Byte width of the vmid field in the answers that carry one (bits[15:0]). */
+#define HC_VMID_BITS 16
+
 /*
  * Dispatch `func_id` for `caller`. The arch passes current_vcpu()->owner and
- * nothing from the guest's argument registers identifies the caller. Returns
- * HC_OK or a negative errno; a word the caller should see in x1 comes back
- * through *ret (left untouched on failure).
+ * nothing from the guest's argument registers identifies the caller; `caller`
+ * is therefore a precondition, not a parameter to validate (only an arch entry
+ * calls this, and it always has a current vCPU).
+ * Returns HC_OK or a negative errno; a word the caller should see in x1 comes
+ * back through *ret (left untouched on failure).
  */
 s64 hypercall_dispatch(struct vm *caller, u32 func_id, u64 a1, u64 a2,
                        u64 *ret);
