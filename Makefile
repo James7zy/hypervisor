@@ -119,7 +119,7 @@ SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -fno-pic -fno-pie \
               -Wall -Wextra -Werror -O2 -g
 # Bare-metal SVM test guests: one shared runtime, one binary per case
 # (tests/svm/cases/<case>.c -> $(BUILD_DIR)/svm/svm-<case>.bin).
-SVM_CASES  := basic vtimer vm1 traps psci ctxsw preempt
+SVM_CASES  := basic vtimer vm1 traps psci ctxsw preempt hcall
 SVM_BINS   := $(SVM_CASES:%=$(BUILD_DIR)/svm/svm-%.bin)
 SVM_COMMON := tests/svm/svm_lib.c tests/svm/svm_vectors.S
 
@@ -128,7 +128,7 @@ HOST_CC    := cc
 .PHONY: all run clean defconfig menuconfig help svm check-offsets host-test check-arch-boundary \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
 	test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell \
-	test-qemu-ctxsw test-qemu-preempt test-linux test-x86-stub test guest
+	test-qemu-ctxsw test-qemu-preempt test-qemu-hcall test-linux test-x86-stub test guest
 
 .NOTPARALLEL: test
 
@@ -401,6 +401,15 @@ test-qemu-shell: test-svm-dual-build
 	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm-basic.bin \
 	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm/svm-vm1.bin sh tests/run_shell_test.sh
 
+# HV-005: the hypercall ABI end to end. ONE binary for both VMs -- the guest
+# finds its own vmid from HC_VM_QUERY, so the Service branch and the refused
+# branch both run from the same image.
+test-qemu-hcall: test-svm-dual-build
+	HYPERVISOR_ELF=$(TEST_DUAL_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm-hcall.bin \
+	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm/svm-hcall.bin \
+	sh tests/run_svm_test.sh tests/svm/expect/hcall.txt
+
 # Code outside hypervisor/arch/ may reach the architecture only via *_arch_*
 # hooks and <arch/xxx.h> (ADR-0015); zero tolerance, no allowlist.
 check-arch-boundary:
@@ -418,7 +427,7 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-preempt test-qemu-xvm test-qemu-xvm2
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-preempt test-qemu-xvm test-qemu-xvm2 test-qemu-hcall
 
 # Linux gate (slice D): two real Linux VMs on the 2x2-on-2 shared-pCPU
 # topology in one command. The Image and the initramfs are BUILD PRODUCTS

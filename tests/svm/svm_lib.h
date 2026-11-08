@@ -13,7 +13,7 @@
 #ifndef SVM_LIB_H
 #define SVM_LIB_H
 
-/* Keep in sync with arch/hypercall.h: SMCCC vendor range (0x87000000+). */
+/* Keep in sync with include/hypercall.h: SMCCC vendor range (0x87000000+). */
 #define HC_GUEST_DONE 0x87000001UL
 #define PSCI_VERSION  0x84000000UL
 
