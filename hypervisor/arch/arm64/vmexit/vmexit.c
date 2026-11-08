@@ -48,17 +48,29 @@ static void handle_hvc(struct arch_regs *regs)
         return;
     }
 
-    switch (func_id) {
-    case HC_GUEST_DONE:
-        printk("[hv] SVM HVC: done (x1=0x%lx)\n", regs->x[1]);
-        hv_restore();   /* no return */
-        break;
-    default:
-        printk("[hv] HVC: unknown func_id=0x%x\n", (unsigned)func_id);
-        regs->x[0] = SMCCC_NOT_SUPPORTED;
-        /* ELR_EL2 already points past the HVC instruction */
-        break;
+    /*
+     * Vendor range (0x87): the HV-005 hypercall ABI. The caller is
+     * current_vcpu()->owner and nothing in x1..x5 names it (E2: a guest must
+     * not be able to claim another's identity). HC_GUEST_DONE stays here, not
+     * in the generic table, because it never returns.
+     */
+    if ((func_id & 0xFF000000U) == HVC_VENDOR_BASE) {
+        if (func_id == HC_GUEST_DONE) {
+            printk("[hv] SVM HVC: done (x1=0x%lx)\n", regs->x[1]);
+            hv_restore();   /* no return */
+        }
+
+        u64 ret = 0;
+        s64 rc = hypercall_dispatch(current_vcpu()->owner, func_id,
+                                    regs->x[1], regs->x[2], &ret);
+        regs->x[0] = (u64)rc;
+        regs->x[1] = ret;
+        return;
     }
+
+    printk("[hv] HVC: unknown func_id=0x%x\n", (unsigned)func_id);
+    regs->x[0] = SMCCC_NOT_SUPPORTED;
+    /* ELR_EL2 already points past the HVC instruction */
 }
 
 /* EC=0x01, trapped wfi/wfe (HCR_EL2.TWI/TWE). WFE passes through; WFI is
