@@ -75,6 +75,40 @@ void sched_enqueue(struct vcpu *v)
     spin_unlock(&q_lock[pcpu]);
 }
 
+int sched_vm_pause(struct vm *v)
+{
+    int r = vm_pause(v);
+
+    if (r != 0)
+        return r;
+    /* Only a resident vCPU needs telling: it is the one whose pCPU would stay
+     * in the guest until its next quantum. Queued ones are already about to be
+     * looked at, and pick drops them (HV-004 F2). */
+    for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++)
+        if (__atomic_load_n(&v->vcpu[i].state, __ATOMIC_ACQUIRE) == VCPU_RUNNING)
+            cpu_arch_kick(v->config->vcpu_pcpu[i]);
+    return 0;
+}
+
+int sched_vm_resume(struct vm *v)
+{
+    int r = vm_resume(v);
+
+    if (r != 0)
+        return r;
+    for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++) {
+        u32 pcpu = v->config->vcpu_pcpu[i];
+
+        /* BLOCKED is not ours to wake (F3): it waits for its own event, and
+         * the pause must not forge one. */
+        if (__atomic_load_n(&v->vcpu[i].state, __ATOMIC_ACQUIRE) != VCPU_RUNNABLE)
+            continue;
+        sched_enqueue(&v->vcpu[i]);
+        cpu_arch_kick(pcpu);   /* its pCPU may be idling on an empty queue */
+    }
+    return 0;
+}
+
 /* The one scheduler loop (M11 B2, gate-2 bill 1 hoist): both pCPUs run this.
  * Shape per the B1 rulings: RUNNING fast path (no-yield unwinds re-enter
  * prev directly), pick with idle-continue and swept-skip, put(prev) only
@@ -126,6 +160,8 @@ void sched_loop(u32 pcpu)
             percpu[pcpu].idle_window = 0;
             continue;
         }
+        if (vm_is_paused(v->owner))
+            continue;                       /* paused VM: drop it, pick again */
         enum vcpu_state state = __atomic_load_n(&v->state, __ATOMIC_ACQUIRE);
         if (state != VCPU_RUNNABLE && state != VCPU_ON_PENDING)
             continue;                       /* swept: drop it, pick again */

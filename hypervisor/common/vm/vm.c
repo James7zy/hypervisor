@@ -18,6 +18,7 @@ void vm_init(void)
 
         m->id     = vmi;
         m->config = &vm_configs[vmi];
+        m->paused = false;
 
         const struct vm_config *cfg = m->config;
 
