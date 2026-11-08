@@ -153,6 +153,13 @@ static void pause_case(void)
     kick_count = 0;
     TEST_ASSERT(sched_vm_pause(&vm[0]) == 0);
     TEST_ASSERT(kick_count == 1);
+
+    /* A CPU_ON that raced the pause leaves ON_PENDING, which pick also drops:
+     * resume must put it back or the secondary never starts. */
+    TEST_ASSERT(sched_vm_pause(&vm[1]) == 0);
+    __atomic_store_n(&vm[1].vcpu[0].state, VCPU_ON_PENDING, __ATOMIC_RELEASE);
+    TEST_ASSERT(sched_vm_resume(&vm[1]) == 0);
+    TEST_ASSERT(sched_pick(0) == &vm[1].vcpu[0]);
 }
 
 int main(void)

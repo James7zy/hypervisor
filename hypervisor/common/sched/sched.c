@@ -98,10 +98,14 @@ int sched_vm_resume(struct vm *v)
         return r;
     for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++) {
         u32 pcpu = v->config->vcpu_pcpu[i];
+        enum vcpu_state st = __atomic_load_n(&v->vcpu[i].state, __ATOMIC_ACQUIRE);
 
-        /* BLOCKED is not ours to wake (F3): it waits for its own event, and
-         * the pause must not forge one. */
-        if (__atomic_load_n(&v->vcpu[i].state, __ATOMIC_ACQUIRE) != VCPU_RUNNABLE)
+        /* ON_PENDING counts too: a CPU_ON that raced the pause is queued, then
+         * dropped by pick (same as RUNNABLE) — skipping it here would lose the
+         * secondary forever instead of resuming it. BLOCKED is not ours to
+         * wake (F3): it waits for its own event and the pause must not forge
+         * one. */
+        if (st != VCPU_RUNNABLE && st != VCPU_ON_PENDING)
             continue;
         sched_enqueue(&v->vcpu[i]);
         cpu_arch_kick(pcpu);   /* its pCPU may be idling on an empty queue */
