@@ -74,6 +74,21 @@ void el2_irq_handler(void)
             hv_restore();          /* noreturn: run loop re-picks */
         }
 
+        /*
+         * A paused VM must not keep the hardware (HV-004 F2). Pause is
+         * asynchronous, so the pCPU still sitting in the guest is forced out
+         * here, by the kick that pause sent. Same shape as the quantum tick
+         * below -- raise the flag and unwind: converting the vCPU, queueing it
+         * and dropping it at pick all belong to sched_loop (one state-machine
+         * path). Inside the idle window there is no guest register file on the
+         * hardware, so hv_restore would load a stale one: fall through and let
+         * the loop re-check its queue instead.
+         */
+        if (vm_is_paused(cv->owner) && !cpu_arch_this_percpu()->idle_window) {
+            sched_preempt_request();
+            hv_restore();   /* noreturn: sched_loop consumes, then drops it */
+        }
+
         /* Drain the current vCPU's pending SGI bitmap into its LRs (M11 C:
          * per vCPU; a kick for a queued sibling is a no-op here — its
          * resume drains). */
