@@ -22,6 +22,7 @@ struct vm;
 #define HC_EPERM    -2
 #define HC_ENOSYS   -3
 #define HC_ENODEV   -4
+#define HC_EBUSY    -5   /* HV-004: the VM is already in the asked-for state */
 
 #define HVC_VENDOR_BASE 0x87000000U
 #define HC_ID(module, index) \
@@ -35,6 +36,8 @@ struct vm;
  * it and unwinds to the run loop). Its value predates this ABI. */
 #define HC_GUEST_DONE   HC_ID(HC_MOD_GENERIC, 1)
 #define HC_VM_QUERY     HC_ID(HC_MOD_VM, 0)
+#define HC_VM_PAUSE     HC_ID(HC_MOD_VM, 1)
+#define HC_VM_RESUME    HC_ID(HC_MOD_VM, 2)
 
 /* Byte width of the vmid field in the answers that carry one (bits[15:0]). */
 #define HC_VMID_BITS 16

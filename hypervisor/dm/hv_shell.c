@@ -149,18 +149,22 @@ static void cmd_vm_list(const char *arg)
 
         bool focused = (i == console_focus);
         bool any_on = vm_any_vcpu_on(m);
-        const char *state = any_on ? "on" : "halted";
+        /* A paused VM is still "on" (its vCPUs hold their state); the flag is
+         * what says it is not being scheduled (HV-004 F6). */
+        bool paused = vm_is_paused(m);
+        const char *state = paused ? "paused" : any_on ? "on" : "halted";
+        bool short_state = any_on && !paused;   /* "on" vs the 6-char words */
 
         /* The state field is padded to the marker column ONLY when a marker
          * follows, so an unmarked row ends right after its state word rather
-         * than trailing blanks into the serial log. "halted" is 6 chars and
-         * "on" is 2, hence the 4-space difference. */
+         * than trailing blanks into the serial log. "halted" and "paused" are
+         * 6 chars and "on" is 2, hence the 4-space difference. */
         printk("   %u    %u-%u  %s%s\n",
                (unsigned)m->id,
                (unsigned)first,
                (unsigned)last,
                state,
-               focused ? (any_on ? "      *" : "  *") : "");
+               focused ? (short_state ? "      *" : "  *") : "");
     }
 }
 
