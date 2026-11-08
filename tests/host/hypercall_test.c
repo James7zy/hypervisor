@@ -9,6 +9,7 @@
 #include <vm.h>
 #include <vm_config.h>
 #include <percpu.h>
+#include <sched.h>
 #include "host_test.h"
 
 int tests_run;
@@ -32,13 +33,23 @@ static void author_vms(void)
     }
 }
 
+/* hypercall.c pauses/resumes through these two; sched.c cannot be linked here
+ * (it would need a real pCPU's queue and arch hooks). The dispatch contract
+ * under test is only which code comes back, so the flag flip -- the real
+ * vm_pause/vm_resume -- is all this stands in for. */
+int sched_vm_pause(struct vm *v) { return vm_pause(v); }
+int sched_vm_resume(struct vm *v) { return vm_resume(v); }
+
 static void test_ids(void)
 {
     /* Shipped ids keep their value (E6): the SVM scenarios hardcode this one. */
     TEST_ASSERT(HC_GUEST_DONE == 0x87000001UL);
     TEST_ASSERT(HC_VERSION == 0x87000000UL);
     TEST_ASSERT(HC_VM_QUERY == 0x87000100UL);
+    TEST_ASSERT(HC_VM_PAUSE == 0x87000101UL);
+    TEST_ASSERT(HC_VM_RESUME == 0x87000102UL);
     TEST_ASSERT(HC_ID(HC_MOD_VM, 1) == 0x87000101UL);
+    TEST_ASSERT(HC_EBUSY == -5);
 }
 
 static void test_derived_state(void)
@@ -113,6 +124,45 @@ static void test_vm_query(void)
                 == HC_ENODEV);
 }
 
+static void test_vm_pause_resume(void)
+{
+    struct vm *service = &vm[0];
+    struct vm *guest   = &vm[1];
+    u64 ret = 0;
+
+    /* Service VM only (F4), so a guest is refused before its arguments are
+     * looked at -- even when it names itself. */
+    TEST_ASSERT(hypercall_dispatch(guest, HC_VM_PAUSE, 1, 0, &ret) == HC_EPERM);
+    TEST_ASSERT(hypercall_dispatch(guest, HC_VM_RESUME, 1, 0, &ret) == HC_EPERM);
+    TEST_ASSERT(hypercall_dispatch(guest, HC_VM_PAUSE, 0, 0, &ret) == HC_EPERM);
+
+    /* Itself: EINVAL. */
+    TEST_ASSERT(hypercall_dispatch(service, HC_VM_PAUSE, 0, 0, &ret) == HC_EINVAL);
+    TEST_ASSERT(hypercall_dispatch(service, HC_VM_RESUME, 0, 0, &ret) == HC_EINVAL);
+
+    /* No such VM, and the vmid field's width bound. */
+    TEST_ASSERT(hypercall_dispatch(service, HC_VM_PAUSE, (u64)NR_VMS, 0, &ret)
+                == HC_ENODEV);
+    TEST_ASSERT(hypercall_dispatch(service, HC_VM_PAUSE, 0x1FFFFULL, 0, &ret)
+                == HC_ENODEV);
+
+    /* Pause, read it back out of the query word, pause again: EBUSY. */
+    TEST_ASSERT(hypercall_dispatch(service, HC_VM_PAUSE, 1, 0, &ret) == HC_OK);
+    TEST_ASSERT(vm_is_paused(guest));
+    TEST_ASSERT(hypercall_dispatch(service, HC_VM_QUERY, 1, 0, &ret) == HC_OK);
+    TEST_ASSERT(((ret >> 32) & 1ULL) == 1);       /* bit32 = paused (F5) */
+    TEST_ASSERT((ret & 0xFFFFULL) == 1);          /* lower fields untouched */
+    TEST_ASSERT(((ret >> 17) & 0x7FFFULL) == 2);
+    TEST_ASSERT(hypercall_dispatch(service, HC_VM_PAUSE, 1, 0, &ret) == HC_EBUSY);
+
+    /* Resume clears it, and a second resume is EBUSY too. */
+    TEST_ASSERT(hypercall_dispatch(service, HC_VM_RESUME, 1, 0, &ret) == HC_OK);
+    TEST_ASSERT(!vm_is_paused(guest));
+    TEST_ASSERT(hypercall_dispatch(service, HC_VM_QUERY, 1, 0, &ret) == HC_OK);
+    TEST_ASSERT(((ret >> 32) & 1ULL) == 0);
+    TEST_ASSERT(hypercall_dispatch(service, HC_VM_RESUME, 1, 0, &ret) == HC_EBUSY);
+}
+
 static void test_unknown(void)
 {
     u64 ret = 0;
@@ -131,6 +181,7 @@ int main(void)
     test_derived_state();
     test_version();
     test_vm_query();
+    test_vm_pause_resume();
     test_unknown();
 
     printf("hypercall %s (%d assertions)\n",
