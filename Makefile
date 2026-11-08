@@ -342,10 +342,11 @@ $(BUILD_DIR)/host/vcpu_state_race_test: tests/host/vcpu_state_race_test.c \
 	$(HOST_CC) $(HOST_TEST_CFLAGS) -pthread -o $@ \
 	    tests/host/vcpu_state_race_test.c hypervisor/common/vm/vcpu_state.c
 
-HOST_HCALL_SRCS := tests/host/hypercall_test.c
+HOST_HCALL_SRCS := tests/host/hypercall_test.c hypervisor/common/hypercall/hypercall.c \
+    hypervisor/common/vm/vm.c
 
 $(BUILD_DIR)/host/hypercall_test: $(HOST_HCALL_SRCS) tests/host/host_test.h \
-    hypervisor/include/vm.h
+    hypervisor/include/hypercall.h hypervisor/include/vm.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_TEST_CFLAGS) -Ihypervisor/arch/x86/include \
 	    -DCONFIG_NR_CPUS=1 -DCONFIG_NR_VMS=3 -ffunction-sections -fdata-sections \

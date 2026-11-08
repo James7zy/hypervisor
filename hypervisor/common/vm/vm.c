@@ -85,6 +85,30 @@ struct vcpu *vcpu_for_pcpu(u32 pcpu)
     return NULL;
 }
 
+/*
+ * ACQUIRE: a vCPU's state is published by another pCPU (or by an interrupt on
+ * this one), and these counts are only ever read as a sample.
+ */
+u32 vm_online_vcpus(const struct vm *v)
+{
+    u32 n = 0;
+
+    for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++)
+        if (__atomic_load_n(&v->vcpu[i].state, __ATOMIC_ACQUIRE) != VCPU_OFF)
+            n++;
+    return n;
+}
+
+bool vm_any_vcpu_on(const struct vm *v)
+{
+    return vm_online_vcpus(v) != 0U;
+}
+
+bool vm_is_service(const struct vm *v)
+{
+    return v->id == 0U;
+}
+
 void vm_run(void)
 {
     /*

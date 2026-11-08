@@ -66,6 +66,16 @@ void vm_run(void);
 struct vcpu *vcpu_for_pcpu(u32 pcpu);
 
 /*
+ * Derived per-VM state: a VM is "on" while any of its vCPUs is not OFF. There
+ * is no VM-level state machine yet, so the EL2 shell's vm_list and
+ * HC_VM_QUERY both read this -- one implementation, one answer.
+ */
+bool vm_any_vcpu_on(const struct vm *v);
+u32  vm_online_vcpus(const struct vm *v);
+/* Service VM = VM0: static topology (ADR-0014), not a config field (E3). */
+bool vm_is_service(const struct vm *v);
+
+/*
  * VM/vCPU hooks every arch implements (ADR-0015); no weak defaults.
  */
 /* Per-VM arch setup (second-stage translation tables and their identifier). */

@@ -43,7 +43,7 @@ static void test_ids(void)
 
 static void test_derived_state(void)
 {
-    const struct vm *guest = &vm[1];
+    struct vm *guest = &vm[1];
 
     TEST_ASSERT(vm_is_service(&vm[0]));
     TEST_ASSERT(!vm_is_service(guest));
@@ -99,10 +99,12 @@ static void test_vm_query(void)
     TEST_ASSERT((ret & 0xFFFFULL) == 0);
     TEST_ASSERT(((ret >> 16) & 1ULL) == 1);
 
-    /* vCPUs that never came up keep the count honest. */
+    /* A VM whose vCPUs are all OFF still answers: vmid, role, count 0. */
+    vm[2].vcpu[0].state = VCPU_OFF;
     ret = 0;
     TEST_ASSERT(hypercall_dispatch(service, HC_VM_QUERY, 2, 0, &ret) == HC_OK);
-    TEST_ASSERT((ret >> 17) == 1);
+    TEST_ASSERT((ret & 0xFFFFULL) == 2);
+    TEST_ASSERT((ret >> 17) == 0);
 
     /* No such VM: out of range, and the id field's width bound. */
     TEST_ASSERT(hypercall_dispatch(service, HC_VM_QUERY, (u64)NR_VMS, 0, &ret)
