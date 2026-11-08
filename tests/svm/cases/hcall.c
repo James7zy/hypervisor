@@ -11,9 +11,13 @@
  * Asserted per VM: HC_VERSION answers 0.1; the self query reports
  * vmid/service/online as that VM's own; querying the other VM succeeds for
  * the Service VM and is refused with HC_EPERM for the guest; an unused id in
- * the vendor range answers HC_ENOSYS. The verdict rides back in the
- * HC_GUEST_DONE payload ("SVM HVC: done (x1=0x...)"), so a silent mismatch
- * fails the expect file even if every printed line happens to appear.
+ * the vendor range answers HC_ENOSYS. HV-004 adds the pause/resume pair: the
+ * guest is refused HC_VM_PAUSE, the Service VM pauses it (query bit 32 = 1),
+ * resumes it, and reports the repeated resume as HC_EBUSY -- while the guest
+ * watches its own counter and has to see a >1 s hole where the freeze was.
+ * The verdict rides back in the HC_GUEST_DONE payload ("SVM HVC: done
+ * (x1=0x...)"), so a silent mismatch fails the expect file even if every
+ * printed line happens to appear.
  *
  * Run: make test-qemu-hcall   (included in the `test` aggregate)
  */
@@ -22,12 +26,15 @@
 /* include/hypercall.h: SMCCC vendor range, base + (module << 8) + index. */
 #define HC_VERSION   0x87000000UL
 #define HC_VM_QUERY  0x87000100UL
+#define HC_VM_PAUSE  0x87000101UL
+#define HC_VM_RESUME 0x87000102UL
 #define HC_UNUSED    0x8700FF00UL   /* no call has this id */
 
 /* Return convention: x0 = 0 or a negative errno. */
 #define HC_EPERM     (-2L)
 #define HC_ENOSYS    (-3L)
 #define HC_ENODEV    (-4L)
+#define HC_EBUSY     (-5L)
 
 /* One past any vmid these profiles configure: the discovery probe range. */
 #define PROBE_VMS 4
@@ -40,6 +47,15 @@ static unsigned long now(void)
 
     __asm__ volatile("isb\n\tmrs %0, CNTVCT_EL0" : "=r"(c) :: "memory");
     return c;
+}
+
+/* Counter frequency: ticks per second (one mrs, no libc). */
+static unsigned long frq(void)
+{
+    unsigned long f;
+
+    __asm__ volatile("mrs %0, CNTFRQ_EL0" : "=r"(f));
+    return f;
 }
 
 /*
@@ -97,6 +113,12 @@ static void expect(int ok, const char *what)
     svm_puts("\n");
 }
 
+/* bit 32 of the query word: the target is paused (HV-004 F5). */
+static unsigned long paused_bit(unsigned long x1)
+{
+    return (x1 >> 32) & 1UL;
+}
+
 /*
  * Guest output is byte-at-a-time, so two VMs printing at once interleave
  * mid-line and no expect line would match; a hypervisor printk in the middle
@@ -106,12 +128,8 @@ static void expect(int ok, const char *what)
  */
 static void wait_ms(unsigned long n)
 {
-    unsigned long f;
-    unsigned long until;
+    unsigned long until = now() + n * (frq() / 1000UL);
 
-    __asm__ volatile("mrs %0, CNTFRQ_EL0" : "=r"(f));
-    f /= 1000UL;
-    until = now() + n * f;
     while (now() < until)
         ;
 }
@@ -208,6 +226,97 @@ void SVM_ENTRY _start(void)
     put_sdec(rc);
     svm_puts("\n");
     expect(rc == HC_ENOSYS, "unused rc");
+
+    /*
+     * HV-004: pause and resume, the two halves exclusive by role (same image
+     * on both VMs). The guest asks first and must be refused -- before the
+     * Service VM's freeze can hide the answer -- then watches its own time
+     * base while the Service VM freezes it for 2 s. Both timelines are fixed
+     * offsets from guest entry (~0.1 s apart on QEMU), and the freeze window
+     * never overlaps the other VM's prints: the console is shared byte by byte.
+     */
+    if (!is_service) {
+        /* Pausing someone else is the Service VM's privilege alone (F4). */
+        mark(self);
+        svm_puts("pause peer rc=");
+        rc = (long)hvc2(HC_VM_PAUSE, peer, &x1);
+        put_sdec(rc);
+        svm_puts("\n");
+        expect(rc == HC_EPERM, "pause peer rc");
+
+        /*
+         * CNTVCT keeps counting while we are not scheduled, so the sample
+         * pair that straddles the freeze jumps by the whole pause. Seeing that
+         * hole is what proves the pause reached the hardware rather than just
+         * setting a flag. Give up after 5 s: a pause that never arrives must
+         * fail the scenario, not hang it.
+         */
+        unsigned long freq = frq();
+        unsigned long start = now();
+        unsigned long last = start;
+        unsigned long hole = 0UL;
+
+        while (now() - start < freq * 5UL) {
+            unsigned long c = now();
+
+            if (c - last > freq) {
+                hole = c - last;
+                break;
+            }
+            last = c;
+        }
+        expect(hole != 0UL, "observed pause");
+        if (hole != 0UL) {
+            /* Stay quiet while the Service VM types its post-resume lines. */
+            wait_ms(500UL);
+            mark(self);
+            svm_puts("observed pause\n");
+        }
+    } else {
+        /* Let the guest finish its own lines before the Service VM's. */
+        wait_ms(2400UL);
+
+        mark(self);
+        svm_puts("pause rc=");
+        rc = (long)hvc2(HC_VM_PAUSE, peer, &x1);
+        put_sdec(rc);
+        svm_puts("\n");
+        expect(rc == 0L, "pause rc");
+
+        mark(self);
+        svm_puts("peer paused=");
+        rc = (long)hvc2(HC_VM_QUERY, peer, &x1);
+        put_dec(paused_bit(x1));
+        svm_puts(" online=");
+        put_dec((x1 >> 17) & 0x7FFFUL);
+        svm_puts("\n");
+        expect(rc == 0L, "paused query rc");
+        expect(paused_bit(x1) == 1UL, "peer paused bit");
+
+        wait_ms(2000UL);   /* the freeze the guest has to notice */
+
+        mark(self);
+        svm_puts("resume rc=");
+        rc = (long)hvc2(HC_VM_RESUME, peer, &x1);
+        put_sdec(rc);
+        svm_puts("\n");
+        expect(rc == 0L, "resume rc");
+
+        mark(self);
+        svm_puts("peer paused after resume=");
+        rc = (long)hvc2(HC_VM_QUERY, peer, &x1);
+        put_dec(paused_bit(x1));
+        svm_puts("\n");
+        expect(rc == 0L && paused_bit(x1) == 0UL, "peer resumed");
+
+        /* Already resumed: EBUSY (-5), not a silent OK. */
+        mark(self);
+        svm_puts("repeat resume rc=");
+        rc = (long)hvc2(HC_VM_RESUME, peer, &x1);
+        put_sdec(rc);
+        svm_puts("\n");
+        expect(rc == HC_EBUSY, "repeat resume rc");
+    }
 
     /* The verdict is checked as text, so a surviving mismatch cannot hide:
      * expect lines are (x1=0x0) for VM0 and (x1=0x100) for VM1. */
