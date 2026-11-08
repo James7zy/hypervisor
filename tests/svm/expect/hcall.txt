@@ -8,3 +8,10 @@ HCALL: vm1 query peer rc=-2
 HCALL: vm1 unused rc=-3
 SVM HVC: done (x1=0x0)
 SVM HVC: done (x1=0x100)
+HCALL: vm1 pause peer rc=-2
+HCALL: vm0 pause rc=0
+HCALL: vm0 peer paused=1 online=1
+HCALL: vm0 resume rc=0
+HCALL: vm0 peer paused after resume=0
+HCALL: vm0 repeat resume rc=-5
+HCALL: vm1 observed pause
