@@ -29,7 +29,7 @@ Service VM）；`HC_VM_QUERY` 追加 `paused` 位；`vm_list` 显示暂停态；
 | # | 问题 | 裁定 |
 |---|---|---|
 | F1 | 状态表示 | `struct vm` 加 `bool paused`，**不引入 `enum vm_state`**：现在只有两态，加枚举就是为了将来三态而写的死代码；创建/销毁切片再引入枚举（届时 `paused` 成为其中一态）。 |
-| F2 | 暂停如何生效 | `paused` 是**调度判据**，不是"停下 guest"：`sched_pick` 弹出已暂停 VM 的 vCPU 时**丢弃**（与既有 swept 分支同形，vCPU 保持 RUNNABLE 但不在队列里）；正在 pCPU 上跑的 vCPU 由 kick SGI 强制换下。**异步生效**：hypercall 返回时目标可能还差了最多一个量子/kick 延迟。 |
+| F2 | 暂停如何生效 | `paused` 是**调度判据**，不是"停下 guest"：`sched_loop` 在 `sched_pick()` 之后把已暂停 VM 的 vCPU **丢弃**（与既有 swept 分支同形，vCPU 保持 RUNNABLE 但不在队列里；pick 本身保持纯出队）；正在 pCPU 上跑的 vCPU 由 kick SGI 强制换下（kick 无独立回归门，正确性由量子 tick 兜底，见 ADR-0023）。**异步生效**：hypercall 返回时目标可能还差了最多一个量子/kick 延迟。 |
 | F3 | 恢复 | 清 `paused` 后把该 VM 所有 RUNNABLE 的 vCPU 重新入队 + kick；BLOCKED 的**不唤醒**（它在等自己的事件，暂停不该伪造唤醒）。 |
 | F4 | 权限 | 两个调用都是 **Service VM 专属**（表项 `roles = HC_ROLE_SERVICE`，HV-005 留下的表项权限分支自此有真实覆盖）；`x1 = vmid`；暂停/恢复自己 → `HC_EINVAL`；重复 pause / 未暂停时 resume → `HC_EBUSY`（新增 `-5`）。 |
 | F5 | 查询 | `HC_VM_QUERY` 返回字追加 `bit 32 = paused`（只加高位，已有位不动）。 |
