@@ -148,11 +148,7 @@ static void cmd_vm_list(const char *arg)
         }
 
         bool focused = (i == console_focus);
-        bool any_on = false;
-        for (u32 j = 0U; j < (u32)VCPUS_PER_VM; j++) {
-            if (__atomic_load_n(&m->vcpu[j].state, __ATOMIC_ACQUIRE) != VCPU_OFF)
-                any_on = true;
-        }
+        bool any_on = vm_any_vcpu_on(m);
         const char *state = any_on ? "on" : "halted";
 
         /* The state field is padded to the marker column ONLY when a marker

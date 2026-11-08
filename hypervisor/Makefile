@@ -3,6 +3,7 @@ hv-objs := \
     boot/main.o \
     lib/string.o \
     lib/print.o \
+    common/hypercall/hypercall.o \
     common/vm/vm.o \
     common/vm/vm_configs.o \
     common/vm/vcpu_state.o \
