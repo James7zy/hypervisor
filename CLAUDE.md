@@ -64,6 +64,12 @@ milestones (CPU / 内存 / 中断 / 设备) over a 56-item requirement list, exe
 H1 → H2 → S1 → D1 order recorded in the project description. Do not restate or re-plan
 the roadmap in this repo; track progress there, not here.
 
+**Each unit of work ends with a Linear sync** (user direction, 2026-11-07): after a slice,
+a merge or a daily report, update the affected issue's state and post the evidence
+(commit hashes, gate results, report links) as a comment. If Linear cannot be reached,
+say so in the report — never skip silently. The user owns closing issues and changing
+scope/priority.
+
 `M0`–`M16` in this repo are **historical names** (ADR-0016/0017, spec and devlog file
 names), not the plan. The work once called M11 is `HV-003`. When starting scheduler
 work, read the
