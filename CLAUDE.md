@@ -67,8 +67,13 @@ the roadmap in this repo; track progress there, not here.
 **Each unit of work ends with a Linear sync** (user direction, 2026-11-07): after a slice,
 a merge or a daily report, update the affected issue's state and post the evidence
 (commit hashes, gate results, report links) as a comment. If Linear cannot be reached,
-say so in the report — never skip silently. The user owns closing issues and changing
-scope/priority.
+say so in the report — never skip silently.
+
+**Decisions are the agent's** (user direction, 2026-11-08): every call is delegated,
+including issue closure, scope and priority. Decide, then record it where the next reader
+looks (spec, ADR, report, Linear comment). Delegation is not a licence to drift: the
+time-box and scope-lock rules above still bind, and a decision that widens scope is only
+valid if written down as one.
 
 `M0`–`M16` in this repo are **historical names** (ADR-0016/0017, spec and devlog file
 names), not the plan. The work once called M11 is `HV-003`. When starting scheduler

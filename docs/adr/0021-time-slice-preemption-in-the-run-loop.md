@@ -78,6 +78,9 @@ sequenceDiagram
   是唯一入口。
 - **量子在每次 guest 入口重置**，所以"频繁 trap 又立刻返回"的 guest 实际上不会被抢占；
   它的 trap 本身就是让出点，可接受。
+- **没有 RT 类**：独占 pCPU 的 vCPU 仍每 10 ms 自 tick（self re-pick，不 put、不换出）；
+  HV-003 的"RT VM 走无负载均衡、无时间片重置的最小路径"随 RT VM 类型立项时再实现，
+  现在无消费者。
 - **`PSTATE.I` 实验只在 QEMU 上做过**：RK3588 bring-up（M15）时重跑该探针，结果进
   ADR-0019 缺口表。目前有两份独立证据：架构师的 5 ms 探针，与测试专家 2026-11-07 的
   变体实验（删掉 `preempt` 场景的 `daifclr`，场景仍绿）——后者把该主张挂到了常态门禁上。
