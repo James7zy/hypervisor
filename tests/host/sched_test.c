@@ -24,7 +24,8 @@ static int tick_arm_count;
 
 void cpu_arch_irq_enable(void) {}
 void cpu_arch_irq_disable(void) {}
-void cpu_arch_kick(u32 cpu) { (void)cpu; }
+static int kick_count;
+void cpu_arch_kick(u32 cpu) { (void)cpu; kick_count++; }
 void cpu_arch_timer_tick_arm(void) { tick_arm_count++; }
 void cpu_arch_idle(void)
 {
@@ -97,6 +98,63 @@ static void preempt_case(void)
     TEST_ASSERT(resume_a_count == 2);
 }
 
+/* Pause (F2) and resume (F3) as the scheduler sees them. A is the resident,
+ * B a second vCPU on the same pCPU: once B's VM is paused its pick is dropped
+ * (RUNNABLE, out of the queue, never on the hardware), and only resume puts
+ * it back -- the BLOCKED half must stay blocked, since its own event owns
+ * its wake. */
+static void pause_case(void)
+{
+    for (u32 i = 0; i < NR_VMS; i++) {
+        vm[i] = (struct vm){ .id = i, .config = &config };
+        vm[i].vcpu[0].owner = &vm[i];
+        vm[i].vcpu[0].state = VCPU_RUNNABLE;
+        vm[i].vcpu[0].launched = true;
+    }
+    resident = NULL;
+    run_count = resume_a_count = tick_arm_count = kick_count = 0;
+    percpu[0].cur_vcpu = NULL;
+    preempt_mode = false;
+    sched_init();
+    TEST_ASSERT(sched_vm_pause(&vm[1]) == 0);
+    TEST_ASSERT(vm_is_paused(&vm[1]));
+    TEST_ASSERT(sched_vm_pause(&vm[1]) != 0);   /* already paused → the EBUSY source */
+
+    if (!setjmp(finished))
+        sched_loop(0);
+
+    /* A ran twice (its yield, then the re-pick after B was dropped); B never
+     * reached the hardware and is still RUNNABLE. A sign of the pick having
+     * handed B over: resume_a_count would be 2 (the switch-away to B) and B
+     * would be OFF (the harness models B's entry as a remote SYSTEM_OFF). */
+    TEST_ASSERT(run_count == 2);
+    TEST_ASSERT(resume_a_count == 1);
+    TEST_ASSERT(resident == &vm[0].vcpu[0]);
+    TEST_ASSERT(__atomic_load_n(&vm[1].vcpu[0].state, __ATOMIC_ACQUIRE)
+                == VCPU_RUNNABLE);
+    TEST_ASSERT(sched_pick(0) == NULL);   /* dropped, not re-queued */
+
+    /* Resume re-queues the RUNNABLE vCPU. */
+    TEST_ASSERT(sched_vm_resume(&vm[1]) == 0);
+    TEST_ASSERT(!vm_is_paused(&vm[1]));
+    TEST_ASSERT(sched_pick(0) == &vm[1].vcpu[0]);
+
+    /* BLOCKED is not a resume's business: it waits for its own event. */
+    TEST_ASSERT(sched_vm_pause(&vm[1]) == 0);
+    __atomic_store_n(&vm[1].vcpu[0].state, VCPU_BLOCKED, __ATOMIC_RELEASE);
+    TEST_ASSERT(sched_vm_resume(&vm[1]) == 0);
+    TEST_ASSERT(__atomic_load_n(&vm[1].vcpu[0].state, __ATOMIC_ACQUIRE)
+                == VCPU_BLOCKED);
+    TEST_ASSERT(sched_pick(0) == NULL);
+
+    /* Pause forces the resident out through a kick: nothing else tells that
+     * pCPU to look at the flag. */
+    __atomic_store_n(&vm[0].vcpu[0].state, VCPU_RUNNING, __ATOMIC_RELEASE);
+    kick_count = 0;
+    TEST_ASSERT(sched_vm_pause(&vm[0]) == 0);
+    TEST_ASSERT(kick_count == 1);
+}
+
 int main(void)
 {
     for (volatile int launched = 0; launched <= 1; launched++) {
@@ -117,6 +175,7 @@ int main(void)
         TEST_ASSERT(vm[1].vcpu[0].state == VCPU_OFF);
     }
     preempt_case();
+    pause_case();
     printf("scheduler %s (%d assertions)\n", tests_failed ? "FAIL" : "PASS", tests_run);
     return tests_failed != 0;
 }
