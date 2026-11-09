@@ -1,6 +1,7 @@
 # HV-004：暂停请求的执行静止确认
 
-> 状态：设计复核 PASS，父架构师仅批准 T1（具体证明与行为 RED）；独立复核 T1 前禁止进入 T2 GREEN。
+> 状态：T1 同源 RED 已独立验证，软件证明有条件通过；父架构师批准下述最小 HCR 修订及 T2 实施。
+> 这是设计准入，不是 GREEN/硬件验收；首次 idle 路由、无 timer kick→ack 与 guest 后路由证据仍待实现验证。
 > 基线 `3b8b9a8`，分支 `feature/hv004-pause-confirmation`。
 > Linear：[H-107](https://linear.app/jamestam/issue/H-107)。本片属于已有 pause/resume 能力闭环，
 > 不关闭完整 VM 生命周期需求，不宣称 H-125 的资源回收已完成。
@@ -90,6 +91,8 @@ RESUME刚放回的候选。CPU_ON/wake发布后才入队的既有路径也必须
 ### Idle 无丢通知协议（本片必要条件）
 
 - 待确认代次纳入睡眠判据，不能只看队列空；即便只有OFF secondary且无timer，也要响应。
+  共享核正在运行另一VM时，kick处理须检查本核任一相关VM的待确认代次并请求unwind，
+  不能只看当前owner的paused。idle_window内仍返回EL2指令流，ack只能在scheduler发布。
 - 调度循环设置idle_window后，最后一次检查“队列空且无待确认代次”到WFI之间保持
   本核IRQ屏蔽，避免唯一kick先被handler消费。IRQ只是PSTATE屏蔽，不关闭GIC对应SGI
   或用PMR屏蔽唤醒信号；pending IRQ须能结束WFI。
@@ -105,10 +108,31 @@ RESUME刚放回的候选。CPU_ON/wake发布后才入队的既有路径也必须
   不挡住唤醒信号；当前配置kick priority=0xa0、PMR=0xff，handler需priority-drop/deactivate。
   只用PSTATE.I延迟处理，不关闭SGI或在PMR层屏蔽通知，不笼统声称所有masked IRQ均能唤醒。
 - Linux arm64 `cpu_do_idle()`支持DSB/WFI及PMR条件，`kvm/arm.c`的enable→ISB→disable
-  引用ARM DDI0487G.b D1.13.4。T1仍须补齐ARM WFI wake-up与GICv3通知规则依据；
-  本轮设计复核没有直接通读规范原文，代码参考或QEMU绿灯不能替代硬件依据。
+  引用ARM DDI0487G.b D1.13.4。T1与独立复核已核对官方DDI0487G.b/IHI0069H.b相关条款，
+  版本、哈希、定位见[T1报告](../../reports/2026-11-09-hv004-pause-t1-review.md)；不是通读全部规范。
   公共hook注释须区分ARM masked-WFI和x86 HLT；x86仅链接stub，不外推为可运行idle实现。
   host覆盖检查前、检查后/WFI前两个kick窗口；QEMU验证无timer空核确认。
+
+### T1 后批准的最小 HCR 初始化修订
+
+独立复核确认：只有guest run才写HCR时，首次OFF-secondary idle不能保证EL2 IRQ路由。
+DDI D1.13.2 Table D1-13中IMO=0/TGE=0为C类，不属于D1.16.2物理WFI唤醒条件；
+IMO复位值UNKNOWN，不得将缺保证描述为实测0。父批准如下必要修订，时间盒不顺延：
+
+- 现有ARM `cpu_arch_init()`、`secondary_main()`入口，在EL2 MMU初始化/enable之前，
+  全值写`HCR_EL2_HOST_BASE = RW|FMO|IMO|AMO = 0x80000038`，紧接带memory clobber的ISB。
+  DAIF保持屏蔽；不提前开IRQ，不新增generic hook或每轮idle的HCR切换。
+- 在现有`arch/sysreg.h`收敛HCR bit/组合定义；guest reset使用
+  `HCR_EL2_GUEST_BASE = HOST_BASE|VM|TWI|TWE|TID3|TSC = 0x800c6039`，保持旧guest写值。
+  CPU_ON复制shadow、run写物理HCR/ISB的链不变，所有guest entry保留IMO/FMO/AMO。
+- 两基线均E2H/TGE=0；初始VM/VI/VF/VSE=0，VM仅在Stage-2就绪后guest run启用。
+  head.S已有stack/VBAR/DAIF顺序不扩大改造；TPIDR/cur_vcpu/GIC未就绪时不能开放IRQ。
+  不对UNKNOWN寄存器仅OR IMO；不修改全局SYSREG宏、不承诺FIQ/SError新能力。
+- 实际验证首次无guest/no-timer secondary的HCR、DAIF、Group1/PMR/RPR及kick→同代ack；
+  guest首次run后核对IMO及E2H/TGE不回退、VM时机正确。使用关键位而非全字强等号，
+  因TSC等位可RAZ。boot无候选路径也须覆盖；旧hcall PASS不能替代这些证据。
+- T2交付软件GREEN及初始化修订，T3把实际硬件观察接入已冻结场景；缺证据不得验收。
+  非VHE QEMU为本片边界；EL3/SCR、任意warm-entry MMU/TLB、RK3588验收不外推。
 
 ```mermaid
 sequenceDiagram
