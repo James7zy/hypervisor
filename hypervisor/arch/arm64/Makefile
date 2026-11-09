@@ -9,6 +9,7 @@ arch-objs := \
     arch/arm64/board/$(BOARD)/board.o \
     arch/arm64/mmu/el2_mmu.o \
     arch/arm64/mmu/stage2.o \
+    arch/arm64/mmu/stage2_build.o \
     arch/arm64/guest/fp.o \
     arch/arm64/vmexit/vmexit.o \
     arch/arm64/vmexit/vmexit_asm.o \
