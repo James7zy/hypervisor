@@ -80,7 +80,10 @@ void data_abort_report(u64 esr)
 {
     u32 iss = (u32)(esr & 0x01FFFFFFU);
 
+    /* VM-local vCPU index, not the pCPU: current_vcpu_id() is the physical
+     * core (the repo's "[hv] ... cpu%u" convention); a fault on a shared pCPU
+     * would otherwise be reported against the wrong vCPU. */
     printk("[hv] s2 fault: vCPU%u ipa=0x%lx fsc=0x%x ec=0x%x\n",
-           (unsigned)current_vcpu_id(), mmio_faulting_ipa(),
+           (unsigned)current_vcpu()->vcpu_idx, mmio_faulting_ipa(),
            (unsigned)ISS_DFSC(iss), (unsigned)((esr >> 26) & 0x3FU));
 }

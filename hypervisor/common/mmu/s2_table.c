@@ -36,6 +36,23 @@ static const struct {
 };
 
 /* Block/page descriptor for `pa` with the attribute word `attr`. */
+
+/* Attribute word validation shared by the mapping calls: the selector indexes
+ * s2_attr_bits[] (two entries), so an out-of-range value must fail instead of
+ * reading past the array (a silently Device-nGnRnE descriptor otherwise). */
+#define S2_ATTR_VALID_BITS (S2_ATTR_MASK | S2_PROT_MASK | S2_XN)
+
+static bool s2_attr_ok(u32 attr)
+{
+    if ((attr & ~(u32)S2_ATTR_VALID_BITS) != 0U)
+        return false;                       /* unknown bit: caller typo */
+    return (attr & S2_ATTR_MASK) <= S2_ATTR_DEVICE_nGnRE;
+}
+
+/* Stage-2 output addresses are 48-bit (D_OA_MASK); a larger pa would be
+ * truncated into a mapping to some other page. */
+#define S2_PA_LIMIT (1ULL << 48)
+
 static u64 s2_encode(u64 pa, u32 attr)
 {
     u32 sel = attr & S2_ATTR_MASK;
@@ -170,7 +187,9 @@ int s2_map(u64 *root, struct s2_pool *p, u64 ipa, u64 pa, u64 len, u32 attr,
 {
     if ((ipa & (S2_PAGE_SIZE - 1ULL)) != 0U || (pa & (S2_PAGE_SIZE - 1ULL)) != 0U ||
         (len & (S2_PAGE_SIZE - 1ULL)) != 0U || len == 0U ||
-        ipa >= IPA_LIMIT || len > IPA_LIMIT - ipa)
+        ipa >= IPA_LIMIT || len > IPA_LIMIT - ipa ||
+        pa >= S2_PA_LIMIT || len > S2_PA_LIMIT - pa ||
+        !s2_attr_ok(attr))
         return S2_EINVAL;
 
     while (len != 0U) {
@@ -291,7 +310,8 @@ int s2_protect(u64 *root, struct s2_pool *p, u64 ipa, u64 len, u32 attr,
 
     (void)p;   /* protect never allocates or frees a table page */
     if ((ipa & (S2_PAGE_SIZE - 1ULL)) != 0U || (len & (S2_PAGE_SIZE - 1ULL)) != 0U ||
-        len == 0U || ipa >= IPA_LIMIT || len > IPA_LIMIT - ipa)
+        len == 0U || ipa >= IPA_LIMIT || len > IPA_LIMIT - ipa ||
+        !s2_attr_ok(attr))
         return S2_EINVAL;
 
     while (len != 0U) {

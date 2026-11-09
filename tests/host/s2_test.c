@@ -265,7 +265,25 @@ static void arg_case(void)
     /* 39-bit IPA space (VTCR_EL2.T0SZ=25): past the end is not an address. */
     TEST_ASSERT(s2_map(root, &pool, 0x7FFFF00000ULL, 0, BLOCK_2M,
                        S2_ATTR_NORMAL_WB, &flush) == S2_EINVAL);
+    /* The attribute selector indexes a two-entry table: 0b10/0b11 would read
+     * past it (and silently build a Device-nGnRnE descriptor). */
+    TEST_ASSERT(s2_map(root, &pool, 0, 0, PAGE_4K, 0x2U | S2_PROT_RW,
+                       &flush) == S2_EINVAL);
+    TEST_ASSERT(s2_map(root, &pool, 0, 0, PAGE_4K, S2_ATTR_NORMAL_WB | 0x20U,
+                       &flush) == S2_EINVAL);
+    /* Stage-2 output addresses are 48-bit: a larger pa is a different page
+     * once masked, so it must be rejected, not truncated. */
+    TEST_ASSERT(s2_map(root, &pool, 0, 1ULL << 48, PAGE_4K,
+                       S2_ATTR_NORMAL_WB, &flush) == S2_EINVAL);
     TEST_ASSERT(root[0] == 0);
+
+    /* Same guard on the attribute path of an existing mapping. */
+    TEST_ASSERT(s2_pool_alloc(&pool) != NULL);
+    reset();
+    TEST_ASSERT(s2_map(root, &pool, 0, 0, PAGE_4K, S2_ATTR_NORMAL_WB,
+                       &flush) == 0);
+    TEST_ASSERT(s2_protect(root, &pool, 0, PAGE_4K, 0x3U | S2_PROT_RW,
+                           &flush) == S2_EINVAL);
 }
 
 int main(void)
