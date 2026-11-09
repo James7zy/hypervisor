@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: TBD
 # Integration test: boot the hypervisor with one or two bare-metal SVM guests
 # in QEMU and check that every line of an expect file appears in the output
-# (fixed-string match, order-independent).
+# (fixed-string match, order-independent). Optional SVM_FORBID names forbidden markers.
 #
 # Usage: sh tests/run_svm_test.sh tests/svm/expect/<scenario>.txt
 # Called by: make test-qemu / test-qemu-vtimer / test-qemu-dual
@@ -18,20 +18,4 @@ TIMEOUT=10
 
 OUTPUT=$(timeout "${TIMEOUT}" ./scripts/run-qemu.sh </dev/null 2>&1 || true)
 
-FAILURES=0
-while IFS= read -r line; do
-    [ -n "${line}" ] || continue
-    if printf '%s\n' "${OUTPUT}" | grep -qF -- "${line}"; then
-        printf "PASS: '%s'\n" "${line}"
-    else
-        printf "FAIL: '%s' not found in output\n" "${line}"
-        FAILURES=$((FAILURES + 1))
-    fi
-done < "${EXPECT}"
-
-if [ "${FAILURES}" -gt 0 ]; then
-    printf "\n--- QEMU output ---\n%s\n---\n" "${OUTPUT}"
-    exit 1
-fi
-
-printf "ALL PASS\n"
+printf '%s\n' "${OUTPUT}" | sh tests/check_svm_output.sh "${EXPECT}" "${SVM_FORBID:-}"

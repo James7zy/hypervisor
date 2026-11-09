@@ -128,7 +128,7 @@ HOST_CC    := cc
 .PHONY: all run clean defconfig menuconfig help svm check-offsets host-test check-arch-boundary \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
 	test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell \
-	test-qemu-ctxsw test-qemu-preempt test-qemu-hcall test-qemu-s2fault \
+	test-qemu-ctxsw test-qemu-preempt test-qemu-hcall test-qemu-s2fault test-qemu-s2bounds \
 	test-linux test-x86-stub test guest
 
 .NOTPARALLEL: test
@@ -384,6 +384,7 @@ host-test: $(BUILD_DIR)/host/host_test $(BUILD_DIR)/host/sched_test $(BUILD_DIR)
 	$(BUILD_DIR)/host/s2_test
 	$(BUILD_DIR)/host/stage2_build_linux_test
 	$(BUILD_DIR)/host/stage2_build_svm_test
+	sh tests/check_svm_output_test.sh
 
 TEST_BUILD_DIR := build/test-svm
 
@@ -448,6 +449,26 @@ test-qemu-s2fault:
 	SVM_BIN2=$(S2FAULT_BUILD_DIR)/svm/svm-vm1.bin \
 	sh tests/run_svm_test.sh tests/svm/expect/s2fault.txt
 
+# XL-003: three independent boots, not three fatal accesses in one guest.
+S2BOUNDS_BUILD_DIR := build/test-s2bounds
+S2BOUNDS_BINS := $(addprefix $(S2BOUNDS_BUILD_DIR)/svm/svm-s2bounds-,0.bin 1.bin 2.bin)
+
+$(BUILD_DIR)/svm/svm-s2bounds-%.elf: tests/svm/cases/s2bounds.c $(SVM_COMMON) tests/svm/svm_lib.h tests/svm/svm.lds
+	@mkdir -p $(dir $@)
+	$(CC) $(SVM_CFLAGS) -DS2_BOUNDS_PROBE=$* -Wl,--no-warn-rwx-segments \
+	    -T tests/svm/svm.lds -o $@ $< $(SVM_COMMON)
+
+test-qemu-s2bounds:
+	$(MAKE) BUILD_DIR=$(S2BOUNDS_BUILD_DIR) HV_GUEST=svm_xvm2 all svm $(S2BOUNDS_BINS)
+	@set -e; for probe in 0 1 2; do \
+	    echo "Stage-2 bounds probe $$probe (independent QEMU boot)"; \
+	    LINUX_IMAGE= HYPERVISOR_ELF=$(S2BOUNDS_BUILD_DIR)/hypervisor.elf \
+	    SVM_BIN=$(S2BOUNDS_BUILD_DIR)/svm/svm-s2bounds-$$probe.bin \
+	    SVM_BIN2=$(S2BOUNDS_BUILD_DIR)/svm/svm-vm1.bin \
+	    SVM_FORBID=tests/svm/expect/s2bounds-forbid.txt \
+	    sh tests/run_svm_test.sh tests/svm/expect/s2bounds-$$probe.txt; \
+	done
+
 # Code outside hypervisor/arch/ may reach the architecture only via *_arch_*
 # hooks and <arch/xxx.h> (ADR-0015); zero tolerance, no allowlist.
 check-arch-boundary:
@@ -465,7 +486,7 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-preempt test-qemu-xvm test-qemu-xvm2 test-qemu-hcall test-qemu-s2fault
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-preempt test-qemu-xvm test-qemu-xvm2 test-qemu-hcall test-qemu-s2fault test-qemu-s2bounds
 
 # Linux gate (slice D): two real Linux VMs on the 2x2-on-2 shared-pCPU
 # topology in one command. The Image and the initramfs are BUILD PRODUCTS
