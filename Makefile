@@ -90,10 +90,13 @@ else ifeq ($(HV_GUEST),svm_xvm2)
 # M11 slice C survivor detector: BOTH pCPUs shared 2x2-on-2 (see
 # vm_configs.c); make test-qemu-xvm2 and test-qemu-s2fault build this profile.
 CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=2 -DCONFIG_SVM_XVM2=1
+else ifeq ($(HV_GUEST),svm_s2perm)
+CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=2 -DCONFIG_SVM_XVM2=1 -DCONFIG_SVM_S2PERM=1
+CFLAGS += -Itests/svm
 else ifeq ($(HV_GUEST),linux)
 CFLAGS += -DCONFIG_NR_VMS=2
 else
-$(error HV_GUEST must be 'linux', 'svm', 'svm_dual', 'svm_ctxsw', 'svm_xvm' or 'svm_xvm2')
+$(error HV_GUEST must be 'linux', 'svm', 'svm_dual', 'svm_ctxsw', 'svm_xvm' 'svm_xvm2' or 'svm_s2perm')
 endif
 
 ASFLAGS := -g
@@ -113,6 +116,9 @@ ASFLAGS += $(CONFIG_DEFS) $(board-cflags) $(INCLUDES)
 export HV_NR_CPUS := $(board-nr-cpus)
 
 ALL_OBJS  := $(addprefix $(OBJ_DIR)/, $(hv-objs) $(arch-objs) $(board-drivers))
+ifeq ($(HV_GUEST),svm_s2perm)
+ALL_OBJS += $(OBJ_DIR)/tests/svm/s2perm_fixture.o
+endif
 LD_SCRIPT := $(arch-ldscript)
 
 SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -fno-pic -fno-pie \
@@ -144,6 +150,10 @@ $(ELF): $(ALL_OBJS) $(LD_SCRIPT)
 	@mkdir -p $(dir $@)
 	$(LD) -T $(LD_SCRIPT) --no-warn-rwx-segments -o $@ $(ALL_OBJS)
 
+$(OBJ_DIR)/tests/svm/s2perm_fixture.o: tests/svm/s2perm_fixture.c tests/svm/s2perm_fixture.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+
 $(OBJ_DIR)/%.o: hypervisor/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
@@ -162,7 +172,7 @@ $(BUILD_DIR)/svm/svm-%.elf: tests/svm/cases/%.c $(SVM_COMMON) tests/svm/svm_lib.
 
 # FP canaries are trustworthy only if the compiler never touches v0-v31
 # (M11 C T3).
-$(BUILD_DIR)/svm/svm-ctxsw.elf: SVM_CFLAGS += -mgeneral-regs-only
+$(BUILD_DIR)/svm/svm-ctxsw.elf $(BUILD_DIR)/svm/svm-s2perm_survivor.elf: SVM_CFLAGS += -mgeneral-regs-only
 
 $(BUILD_DIR)/svm/svm-%.bin: $(BUILD_DIR)/svm/svm-%.elf
 	$(OBJCOPY) -O binary $< $@
@@ -395,6 +405,7 @@ host-test: $(BUILD_DIR)/host/data_abort_test $(BUILD_DIR)/host/host_test $(BUILD
 	$(BUILD_DIR)/host/stage2_build_linux_test
 	$(BUILD_DIR)/host/stage2_build_svm_test
 	sh tests/check_svm_output_test.sh
+	python3 -B tests/check_s2perm_output_test.py
 
 TEST_BUILD_DIR := build/test-svm
 
@@ -496,7 +507,25 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-preempt test-qemu-xvm test-qemu-xvm2 test-qemu-hcall test-qemu-s2fault test-qemu-s2bounds
+S2PERM_BUILD_DIR := build/test-s2perm
+S2PERM_BINS := $(addprefix $(S2PERM_BUILD_DIR)/svm/svm-s2perm-,0.bin 1.bin)
+
+$(BUILD_DIR)/svm/svm-s2perm-%.elf: tests/svm/cases/s2perm.c $(SVM_COMMON) tests/svm/svm_lib.h tests/svm/s2perm.lds
+	@mkdir -p $(dir $@)
+	$(CC) $(SVM_CFLAGS) -mgeneral-regs-only -DS2PERM_PROBE=$* -Wl,--no-warn-rwx-segments \
+	    -T tests/svm/s2perm.lds -o $@ $< $(SVM_COMMON)
+
+.PHONY: test-qemu-s2perm
+test-qemu-s2perm:
+	$(MAKE) BUILD_DIR=$(S2PERM_BUILD_DIR) HV_GUEST=svm_s2perm all $(S2PERM_BINS) $(S2PERM_BUILD_DIR)/svm/svm-s2perm_survivor.bin
+	@set -e; for probe in 0 1; do \
+	    HYPERVISOR_ELF=$(S2PERM_BUILD_DIR)/hypervisor.elf \
+	    SVM_BIN=$(S2PERM_BUILD_DIR)/svm/svm-s2perm-$$probe.bin \
+	    SVM_BIN2=$(S2PERM_BUILD_DIR)/svm/svm-s2perm_survivor.bin \
+	    sh tests/run_s2perm_test.sh $$probe $(S2PERM_BUILD_DIR)/s2perm-$$probe.log; \
+	done
+
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-preempt test-qemu-xvm test-qemu-xvm2 test-qemu-hcall test-qemu-s2fault test-qemu-s2bounds test-qemu-s2perm
 
 # Linux gate (slice D): two real Linux VMs on the 2x2-on-2 shared-pCPU
 # topology in one command. The Image and the initramfs are BUILD PRODUCTS

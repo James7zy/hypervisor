@@ -8,6 +8,9 @@
 #include "el2_mmu.h"     /* MAIR_EL2 slot layout (EL2's own stage 1) */
 #include "stage2.h"
 #include "stage2_build.h"
+#ifdef CONFIG_SVM_S2PERM
+#include "s2perm_fixture.h"
+#endif
 
 /*
  * VTCR_EL2: T0SZ=25 (39-bit IPA), SL0=1 (L1 start), IRGN0/ORGN0=1 (WB RA-WA),
@@ -65,6 +68,13 @@ int stage2_init(struct vm *m)
         return rc;
     }
 
+#ifdef CONFIG_SVM_S2PERM
+    rc = svm_s2perm_fixture(root, &s2_pool, m);
+    if (rc != 0) {
+        printk("[hv] s2perm fixture: VM%u rejected (%d)\n", (unsigned)m->id, rc);
+        return rc;
+    }
+#endif
     stage2_flush_vm();
 
     /* Every vCPU of the VM shares the same Stage-2 table / VMID. */
