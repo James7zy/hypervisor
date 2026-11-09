@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Validate a commit message against scripts/commit-message/commit-message.md.
+# Usage: check-commit-message [message-file]   (no file: the HEAD commit message)
+set -u
+
+DOMAINS=' kernel arch arch_virt hypercall device_virt base_libs hypervisor build
+          ci scripts docs tests guest tools treewide '
+MAX_LINE=72
+
+if [ $# -gt 0 ]; then
+    msg=$(cat -- "$1") || exit 1
+else
+    msg=$(git log -1 --format=%B) || exit 1
+fi
+
+# git hands the hook COMMIT_EDITMSG including the '#' template lines.
+lines=()
+while IFS= read -r line; do
+    case $line in '#'*) continue ;; esac
+    lines+=("$line")
+done <<< "$msg"
+
+[ ${#lines[@]} -gt 0 ] || { echo 'commit-message: empty message' >&2; exit 1; }
+
+case ${lines[0]} in
+    Merge*|Revert*|fixup!*|squash!*|amend!*) exit 0 ;;
+esac
+
+errors=0
+err() { printf 'commit-message: %s\n' "$1" >&2; errors=$((errors + 1)); }
+
+check_entry() {
+    local entry=$1 where=$2 domain
+    if [[ ! $entry =~ ^\[([A-Za-z_]+)\]\[([A-Za-z_-]+)\]\ ([A-Za-z0-9_./-]+):\ (.+)$ ]]; then
+        err "$where: want '[domain][kind] component: summary', got: $entry"
+        return
+    fi
+    domain=${BASH_REMATCH[1]}
+    case $DOMAINS in
+        *" $domain "*) ;;
+        *) err "$where: unknown domain '$domain', see scripts/commit-message/commit-message.md" ;;
+    esac
+    [ ${#entry} -le $MAX_LINE ] || err "$where: ${#entry} chars, max $MAX_LINE"
+}
+
+check_entry "${lines[0]}" subject
+
+# Secondary domain block: blank line, then '['-prefixed lines until a blank line.
+if [ ${#lines[@]} -gt 2 ] && [ -z "${lines[1]}" ] && [[ ${lines[2]} == \[* ]]; then
+    i=2
+    while [ $i -lt ${#lines[@]} ] && [ -n "${lines[$i]}" ]; do
+        [[ ${lines[$i]} == \[* ]] && check_entry "${lines[$i]}" "line $((i + 1))"
+        i=$((i + 1))
+    done
+fi
+
+[ $errors -eq 0 ] || exit 1
