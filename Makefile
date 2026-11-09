@@ -88,7 +88,7 @@ else ifeq ($(HV_GUEST),svm_xvm)
 CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=2 -DCONFIG_SVM_XVM=1
 else ifeq ($(HV_GUEST),svm_xvm2)
 # M11 slice C survivor detector: BOTH pCPUs shared 2x2-on-2 (see
-# vm_configs.c); only make test-qemu-xvm2 builds this profile.
+# vm_configs.c); make test-qemu-xvm2 and test-qemu-s2fault build this profile.
 CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=2 -DCONFIG_SVM_XVM2=1
 else ifeq ($(HV_GUEST),linux)
 CFLAGS += -DCONFIG_NR_VMS=2
@@ -119,7 +119,7 @@ SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -fno-pic -fno-pie \
               -Wall -Wextra -Werror -O2 -g
 # Bare-metal SVM test guests: one shared runtime, one binary per case
 # (tests/svm/cases/<case>.c -> $(BUILD_DIR)/svm/svm-<case>.bin).
-SVM_CASES  := basic vtimer vm1 traps psci ctxsw preempt hcall
+SVM_CASES  := basic vtimer vm1 traps psci ctxsw preempt hcall s2fault
 SVM_BINS   := $(SVM_CASES:%=$(BUILD_DIR)/svm/svm-%.bin)
 SVM_COMMON := tests/svm/svm_lib.c tests/svm/svm_vectors.S
 
@@ -128,7 +128,8 @@ HOST_CC    := cc
 .PHONY: all run clean defconfig menuconfig help svm check-offsets host-test check-arch-boundary \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
 	test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell \
-	test-qemu-ctxsw test-qemu-preempt test-qemu-hcall test-linux test-x86-stub test guest
+	test-qemu-ctxsw test-qemu-preempt test-qemu-hcall test-qemu-s2fault \
+	test-linux test-x86-stub test guest
 
 .NOTPARALLEL: test
 
@@ -418,6 +419,17 @@ test-qemu-hcall: test-svm-dual-build
 	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm/svm-hcall.bin \
 	sh tests/run_svm_test.sh tests/svm/expect/hcall.txt
 
+# HV-011/HV-012: a guest's own Stage-2 fault parks that vCPU, not the pCPU.
+# It runs on the 2x2-on-2 profile because VM1's vCPU0 must share pCPU0 with the
+# faulting VM0 vCPU0 -- that is the only way the log proves the pCPU survived.
+S2FAULT_BUILD_DIR := build/test-s2fault
+test-qemu-s2fault:
+	$(MAKE) BUILD_DIR=$(S2FAULT_BUILD_DIR) HV_GUEST=svm_xvm2 all svm
+	LINUX_IMAGE= HYPERVISOR_ELF=$(S2FAULT_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(S2FAULT_BUILD_DIR)/svm/svm-s2fault.bin \
+	SVM_BIN2=$(S2FAULT_BUILD_DIR)/svm/svm-vm1.bin \
+	sh tests/run_svm_test.sh tests/svm/expect/s2fault.txt
+
 # Code outside hypervisor/arch/ may reach the architecture only via *_arch_*
 # hooks and <arch/xxx.h> (ADR-0015); zero tolerance, no allowlist.
 check-arch-boundary:
@@ -435,7 +447,7 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-preempt test-qemu-xvm test-qemu-xvm2 test-qemu-hcall
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw test-qemu-preempt test-qemu-xvm test-qemu-xvm2 test-qemu-hcall test-qemu-s2fault
 
 # Linux gate (slice D): two real Linux VMs on the 2x2-on-2 shared-pCPU
 # topology in one command. The Image and the initramfs are BUILD PRODUCTS

@@ -4,7 +4,6 @@
 #include <vm.h>
 #include <mmio.h>
 #include "data_abort.h"
-
 /* ESR_EL2 ISS fields for a Data Abort (EC = 0x24). */
 #define ISS_ISV(iss)  (((iss) >> 24) & 0x1U)   /* Instruction Syndrome Valid */
 #define ISS_SAS(iss)  (((iss) >> 22) & 0x3U)   /* Access size 00..11 -> 1/2/4/8 */
@@ -70,4 +69,18 @@ int mmio_handle_data_abort(struct arch_regs *regs, u64 esr)
     /* Advance past the faulting load/store; el1_sync_handler erets back. */
     regs->elr_el2 += 4;
     return 0;
+}
+
+/*
+ * Diagnostic for a data abort no MMIO handler claimed: which IPA, which fault.
+ * The caller then parks this vCPU (HV-012 G5) — reporting and stopping are
+ * separate so the vCPU state machine stays in vmexit.c.
+ */
+void data_abort_report(u64 esr)
+{
+    u32 iss = (u32)(esr & 0x01FFFFFFU);
+
+    printk("[hv] s2 fault: vCPU%u ipa=0x%lx fsc=0x%x ec=0x%x\n",
+           (unsigned)current_vcpu_id(), mmio_faulting_ipa(),
+           (unsigned)ISS_DFSC(iss), (unsigned)((esr >> 26) & 0x3FU));
 }
