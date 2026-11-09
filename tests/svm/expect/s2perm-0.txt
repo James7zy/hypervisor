@@ -1,0 +1,4 @@
+[hv] Hello from EL2
+[hv] s2perm fixture: vm=0 checked ro=0x40210000 xn=0x40211000
+[hv] s2perm fixture: vm=1 checked ro=0x0 xn=0x0
+SVM: s2perm RO read ok

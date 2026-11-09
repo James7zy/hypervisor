@@ -196,6 +196,35 @@ static void protect_case(void)
                            S2_ATTR_NORMAL_WB | S2_PROT_RO, &flush) == S2_EINVAL);
 }
 
+/* 真实 L3 叶：RO/XN 独立设置/清除，保留 OA/类型与邻页，no-op 不 flush。 */
+static void protect_page_case(void)
+{
+    const u32 attrs[] = { S2_PROT_RO, S2_PROT_RO | S2_XN,
+                          S2_PROT_RW | S2_XN, S2_PROT_RW };
+    const u64 permissions[] = { DESC_S2AP_RO, DESC_S2AP_RO | DESC_XN,
+                               DESC_S2AP_RW | DESC_XN, DESC_S2AP_RW };
+    bool flush = false;
+    reset();
+    TEST_ASSERT(s2_map(root, &pool, 0x40200000, 0x80200000, 3 * PAGE_4K,
+                       S2_ATTR_NORMAL_WB | S2_PROT_RW, &flush) == 0);
+    u64 *l2 = (u64 *)(uintptr_t)DESC_OA(root[1]);
+    u64 *l3 = (u64 *)(uintptr_t)DESC_OA(l2[1]);
+    u64 left = l3[0], right = l3[2];
+    for (u32 i = 0; i < 4; i++) {
+        flush = false;
+        TEST_ASSERT(s2_protect(root, &pool, 0x40201000, PAGE_4K,
+                               S2_ATTR_NORMAL_WB | attrs[i], &flush) == 0);
+        TEST_ASSERT(flush);
+        TEST_ASSERT(l3[1] == (0x80201000ULL | DESC_PAGE | DESC_NORM |
+                              DESC_SH_ISH | DESC_AF | permissions[i]));
+        TEST_ASSERT(l3[0] == left && l3[2] == right);
+        flush = false;
+        TEST_ASSERT(s2_protect(root, &pool, 0x40201000, PAGE_4K,
+                               S2_ATTR_NORMAL_WB | attrs[i], &flush) == 0);
+        TEST_ASSERT(!flush);
+    }
+}
+
 /* HV-011 G6-limited scope: no block splitting, so a page-range request that
  * lands inside an existing block is refused, never silently reshaped. */
 static void no_split_case(void)
@@ -293,6 +322,7 @@ int main(void)
     map_1g_case();
     map_page_case();
     protect_case();
+    protect_page_case();
     no_split_case();
     mixed_case();
     exhaustion_case();
