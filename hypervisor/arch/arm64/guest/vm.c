@@ -15,9 +15,9 @@
 #include <vgic_v3_mmio.h>
 #include <vgic_sgi.h>
 
-void vm_arch_init(struct vm *m)
+int vm_arch_init(struct vm *m)
 {
-    stage2_init(m);
+    return stage2_init(m);
 }
 
 void vm_arch_devices_init(void)

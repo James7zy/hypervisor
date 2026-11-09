@@ -4,6 +4,8 @@
 #include <board.h>
 #include <printk.h>
 #include <vm_config.h>   /* struct vm_config (vmid / ram_pa) */
+#include <s2_table.h>
+#include "el2_mmu.h"     /* MAIR_EL2 slot layout (EL2's own stage 1) */
 #include "stage2.h"
 
 /*
@@ -22,82 +24,151 @@
 #define VTCR_EL2_VALUE \
     (VTCR_RES1 | VTCR_T0SZ | VTCR_SL0 | VTCR_IRGN0 | VTCR_ORGN0 | VTCR_SH0 | VTCR_TG0 | VTCR_PS)
 
-/* Stage-2 Level-1 block descriptor fields */
-#define S2_BLOCK        0x1ULL
-#define S2_MEMATTR_DEV  (0x1ULL << 2)   /* Device-nGnRE: MemAttr[3:0]=0001 */
-#define S2_MEMATTR_NORM (0xFULL << 2)   /* Normal WB inner+outer: MemAttr=1111 */
-#define S2_S2AP_RW      (0x3ULL << 6)   /* R/W EL0+EL1 */
-#define S2_SH_OSH       (0x2ULL << 8)   /* Outer Shareable */
-#define S2_SH_ISH       (0x3ULL << 8)   /* Inner Shareable */
-#define S2_AF           (1ULL   << 10)  /* Access Flag */
-#define S2_XN           (1ULL   << 54)  /* Execute-never */
-#define S2_TABLE        0x3ULL          /* Table descriptor: bits[1:0]=0b11 (vs block 0b01) */
+/*
+ * Reference descriptors: exactly what the pre-allocator static tables held, so
+ * the rewrite is checked rather than trusted (HV-011 G6). RAM was one 1 GB
+ * Normal block, the device 1 GB was 2 MB blocks except the GICD/GICR and PL011
+ * windows, and every other L1 entry was invalid.
+ */
+#define REF_DEV_BLOCK(i) (((u64)(i) << 21) | 0x1ULL | (0x1ULL << 2) | \
+                          (0x3ULL << 6) | (0x2ULL << 8) | (1ULL << 10) | (1ULL << 54))
+#define REF_RAM_BLOCK(pa) ((pa) | 0x1ULL | (0xFULL << 2) | (0x3ULL << 6) | \
+                           (0x3ULL << 8) | (1ULL << 10))
+#define DESC_OA_BITS 0x0000FFFFFFFFF000ULL   /* descriptor bits [47:12] */
 
-/* Must be 4 KB-aligned: VTTBR_EL2[11:0] are reserved and must be zero.
- * One table per VM, keyed by vm->id. */
-static u64 l1_table[NR_VMS][512] __attribute__((aligned(4096)));
+/* 4 KB table pages (HV-011 G1) and one L1 root per VM. VTTBR_EL2[11:0] are
+ * reserved, so both must be 4 KB-aligned. */
+static u64 s2_pool_mem[S2_POOL_PAGES * 512] __attribute__((aligned(4096)));
+static struct s2_pool s2_pool;
+static bool s2_pool_ready;
+static u64 s2_root[NR_VMS][512] __attribute__((aligned(4096)));
 
 /*
- * L2 table backing l1_table[vm][0] (IPA 0x00000000–0x3FFFFFFF). 512 × 2 MB
- * blocks, identity Device-nGnRE, EXCEPT the one entry covering GICD
- * (0x08000000) + GICR (0x080A0000): left invalid so guest accesses fault →
- * vgic_v3_mmio shadow.
+ * G6 self-check: walk the freshly built tables against the reference values
+ * above. A mismatch names the entry and fails the VM's table build — the guest
+ * never runs with a mapping nobody verified.
  */
-static u64 l2_dev[NR_VMS][512] __attribute__((aligned(4096)));
-
-void stage2_init(struct vm *m)
+static bool stage2_equiv_check(const u64 *root, u64 ram_pa)
 {
-    u64 *l1 = l1_table[m->id];
-    u64 *l2 = l2_dev[m->id];
-    u64  ram_pa = (u64)m->config->ram_pa;
+    u32 gic  = (u32)(BOARD_GIC_DIST_BASE / S2_L2_BLOCK);
+    u32 uart = (u32)(BOARD_UART_BASE / S2_L2_BLOCK);
+    const u64 *l2;
+    u64 want;
+
+    if ((root[0] & 0x3ULL) != 0x3ULL) {
+        printk("[hv] stage2: EQUIV FAIL L1[0]=0x%lx is not a table\n", root[0]);
+        return false;
+    }
+    l2 = (const u64 *)(uintptr_t)(root[0] & DESC_OA_BITS);
+
+    for (u32 i = 0; i < 512U; i++) {
+        want = (i == gic || i == uart) ? 0ULL : REF_DEV_BLOCK(i);
+        if (l2[i] != want) {
+            printk("[hv] stage2: EQUIV FAIL l2[%u]=0x%lx want 0x%lx\n",
+                   (unsigned)i, l2[i], want);
+            return false;
+        }
+    }
+
+    want = REF_RAM_BLOCK(ram_pa);
+    if (root[1] != want) {
+        printk("[hv] stage2: EQUIV FAIL L1[1]=0x%lx want 0x%lx\n",
+               root[1], want);
+        return false;
+    }
+
+    for (u32 i = 2; i < 512U; i++) {
+        if (root[i] != 0ULL) {
+            printk("[hv] stage2: EQUIV FAIL L1[%u]=0x%lx want 0x0\n",
+                   (unsigned)i, root[i]);
+            return false;
+        }
+    }
+    return true;
+}
+
+int stage2_init(struct vm *m)
+{
+    u64 *root = s2_root[m->id];
+    /*
+     * An L1 block covers 1 GB, so its output address MUST be 1 GB-aligned.
+     * BOARD_LINUX_RAM_PA is; the SVM profiles' ram_pa (0x40200000) is not and
+     * relies on this mask exactly as the pre-allocator table did (guest IPA
+     * 0x40200000 resolves to identity PA 0x40200000 through the masked base).
+     * The mask asserts that invariant; it is not a rounding step.
+     */
+    u64 ram_pa = (u64)m->config->ram_pa & ~(S2_L1_BLOCK - 1ULL);
+    u32 dev_attr = S2_ATTR_DEVICE_nGnRE | S2_PROT_RW | S2_XN;
+    u64 gic_base  = (u64)(BOARD_GIC_DIST_BASE / S2_L2_BLOCK) * S2_L2_BLOCK;
+    u64 uart_base = (u64)(BOARD_UART_BASE / S2_L2_BLOCK) * S2_L2_BLOCK;
+    bool flush = false;
+    int rc;
+
+    if (!s2_pool_ready) {
+        rc = s2_pool_init(&s2_pool, s2_pool_mem, S2_POOL_PAGES);
+        if (rc != 0) {
+            printk("[hv] stage2: table pool init failed (%d)\n", (int)rc);
+            return rc;
+        }
+        s2_pool_ready = true;
+    }
 
     /*
-     * IPA 0x00000000–0x3FFFFFFF: split the old 1 GB Device block into an L2
-     * table so GICD/GICR (and now PL011) can be punched out. Each L2 entry is
-     * 2 MB; fill all as identity Device-nGnRE, then invalidate the entries
-     * holding GICD+GICR and PL011 → guest access faults → MMIO trap →
-     * vgic_v3_mmio / vuart shadow emulation (ADR-0012; M5 slice 2 for UART).
+     * MAIR_EL2 slots 0/1 = Device-nGnRE / Normal WB: the same two attributes
+     * the descriptors below encode directly (D8.2.6 — a stage-2 walk never
+     * reads MAIR_EL2). Written explicitly instead of trusting reset values,
+     * in el2_mmu.c's slot order because EL2's own stage 1 does index it.
      */
-    for (u32 i = 0; i < 512U; i++)
-        l2[i] = ((u64)i << 21) |
-                S2_BLOCK | S2_MEMATTR_DEV | S2_S2AP_RW | S2_SH_OSH | S2_AF | S2_XN;
-
-    u32 gic_l2_idx = (u32)(BOARD_GIC_DIST_BASE >> 21);
-    if ((u32)(BOARD_GIC_RDIST_BASE >> 21) != gic_l2_idx)
-        printk("[hv] stage2: WARN GICD/GICR span >1 L2 entry "
-               "(D=%u R=%u); punch-hole only covers D's entry\n",
-               gic_l2_idx, (u32)(BOARD_GIC_RDIST_BASE >> 21));
-    l2[gic_l2_idx] = 0;   /* invalid → fault */
+    __asm__ volatile("msr mair_el2, %0\nisb" :: "r"((u64)MAIR_EL2_VALUE)
+                     : "memory");
 
     /*
-     * PL011 (0x09000000, 0x09000000 >> 21 = 72): EL2 now owns the physical
-     * UART exclusively (M5 slice 2). The guest's DR/FR/etc. accesses must
-     * fault into the vuart trap-and-emulate model instead of reaching
-     * hardware directly. guest/qemu_virt.dts declares only pl011@9000000 in
-     * this 2 MB window (checked against the DTS before this change) -- no
-     * other device shares it.
+     * Device 1 GB (IPA 0x00000000-0x3FFFFFFF) as identity 2 MB blocks, with
+     * the GICD/GICR and PL011 2 MB windows left UNMAPPED: guest accesses there
+     * fault into EL2 → MMIO trap → vgic_v3_mmio / vuart shadow emulation
+     * (ADR-0012, ADR-0014). One L2 table serves all three ranges.
      */
-    u32 uart_l2_idx = (u32)(BOARD_UART_BASE >> 21);
-    l2[uart_l2_idx] = 0;   /* invalid → fault → MMIO trap → vuart */
+    if (gic_base != (u64)(BOARD_GIC_RDIST_BASE / S2_L2_BLOCK) * S2_L2_BLOCK)
+        printk("[hv] stage2: WARN GICD/GICR span >1 L2 entry (D=%u R=%u); "
+               "only D's 2 MB window is unmapped\n",
+               (unsigned)(gic_base / S2_L2_BLOCK),
+               (unsigned)(BOARD_GIC_RDIST_BASE / S2_L2_BLOCK));
 
-    l1[0] = (u64)(uintptr_t)l2 | S2_TABLE;
+    rc = s2_map(root, &s2_pool, 0, 0, gic_base, dev_attr, &flush);
+    if (rc == 0)
+        rc = s2_map(root, &s2_pool, gic_base + S2_L2_BLOCK, gic_base + S2_L2_BLOCK,
+                    uart_base - gic_base - S2_L2_BLOCK, dev_attr, &flush);
+    if (rc == 0)
+        rc = s2_map(root, &s2_pool, uart_base + S2_L2_BLOCK, uart_base + S2_L2_BLOCK,
+                    S2_L1_BLOCK - uart_base - S2_L2_BLOCK, dev_attr, &flush);
 
     /*
-     * IPA 0x40000000–0x7FFFFFFF → PA ram_pa: Normal WB (guest RAM).
-     * Non-identity for the Linux guest: ram_pa is a dedicated region that
-     * does not overlap the hv image at 0x40080000. An L1 block is 1 GB, so its
-     * output address MUST be 1 GB-aligned (low 30 bits zero); ram_pa
-     * (BOARD_LINUX_RAM_PA = 0x80000000) is. The mask is an assertion of that
-     * invariant, not a rounding step — if ram_pa were not 1 GB-aligned the
-     * masked-away low bits would silently mis-map the guest.
+     * IPA 0x40000000-0x7FFFFFFF → PA ram_pa: one 1 GB Normal WB block, the
+     * non-identity mapping the Linux guest boots from (ram_pa does not overlap
+     * the hv image at 0x40080000).
      */
-    l1[1] = (ram_pa & 0xFFFFC0000000UL) |
-            S2_BLOCK | S2_MEMATTR_NORM | S2_S2AP_RW | S2_SH_ISH | S2_AF;
+    if (rc == 0)
+        rc = s2_map(root, &s2_pool, BOARD_LINUX_RAM_IPA, ram_pa, S2_L1_BLOCK,
+                    S2_ATTR_NORMAL_WB | S2_PROT_RW, &flush);
+
+    if (rc == 0 && !stage2_equiv_check(root, ram_pa))
+        rc = S2_EINVAL;
+
+    if (rc != 0) {
+        /* Pool exhausted / a mapping changed shape: this VM cannot run.
+         * Report it; the caller keeps the VM's vCPUs OFF (no pCPU halt). */
+        printk("[hv] stage2: VM%u table build failed (%d)\n",
+               (unsigned)m->id, (int)rc);
+        return rc;
+    }
+
+    stage2_flush_vm();
 
     /* Every vCPU of the VM shares the same Stage-2 table / VMID. */
-    u64 vttbr = ((u64)m->config->vmid << 48) | (u64)(uintptr_t)l1;
+    u64 vttbr = ((u64)m->config->vmid << 48) | (u64)(uintptr_t)root;
     for (u32 i = 0; i < VCPUS_PER_VM; i++)
         m->vcpu[i].arch.vttbr_el2 = vttbr;
+    return 0;
 }
 
 void stage2_activate(const struct vcpu *vcpu)
@@ -117,3 +188,21 @@ void stage2_activate(const struct vcpu *vcpu)
     );
 }
 
+void stage2_flush_vm(void)
+{
+    /*
+     * Every VMID, every stage-2 entry: VM-level invalidation after any
+     * map/unmap/protect (HV-011 G7). Conservative on purpose — range
+     * invalidation waits for measured map/switch cost (RK3588 passthrough).
+     * The leading dsb publishes the table writes before the tlbi reads them.
+     */
+    asm volatile(
+        "dsb ish\n"
+        "tlbi vmalls12e1is\n"
+        "dsb ish\n"
+        "isb\n"
+        :
+        :
+        : "memory"
+    );
+}

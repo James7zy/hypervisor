@@ -11,6 +11,16 @@
  * through this translation.
  */
 
+/*
+ * MAIR_EL2: index 0 = Device-nGnRE, index 1 = Normal WB, Read-Allocate,
+ * Write-Allocate (inner+outer). Shared with mmu/stage2.c, which writes the same
+ * pair explicitly: reordering the slots silently changes what address ranges
+ * EL2's own Stage-1 identity map treats as Device.
+ */
+#define MAIR_ATTR_DEV_nGnRE   0x04ULL
+#define MAIR_ATTR_NORMAL_WB   0xFFULL
+#define MAIR_EL2_VALUE        (MAIR_ATTR_DEV_nGnRE | (MAIR_ATTR_NORMAL_WB << 8))
+
 /* Build the shared identity-map L1 table. Boot CPU only, once, before any
  * CPU calls el2_mmu_enable(). */
 void el2_mmu_init(void);
