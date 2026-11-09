@@ -364,13 +364,16 @@ void handle_exit(struct arch_regs *regs, u64 esr)
     case EC_SYS64:    /* see handle_sysreg_trap */
         handle_sysreg_trap(regs, esr);
         return;
-    case EC_DABT_LOW: /* → MMIO trap-and-emulate */
-        if (mmio_handle_data_abort(regs, esr) == 0)
+    case EC_DABT_LOW: { /* → MMIO trap-and-emulate */
+        struct abort_snapshot fault;
+        abort_snapshot_read(&fault, esr, regs->elr_el2);
+        if (mmio_handle_data_abort(regs, &fault) == 0)
             return;   /* handled: ELR advanced; el1_sync_handler erets back */
         /* Unmapped IPA or permission fault with no MMIO handler behind it: the
          * guest's own fault to die of. Report it, park this vCPU. */
-        data_abort_report(esr);
+        data_abort_report(&fault);
         park_current_vcpu();
+    }
     default:
         /* Unknown EC: same rule — a guest that trips an exit we do not
          * implement loses its own vCPU, not the pCPU. */

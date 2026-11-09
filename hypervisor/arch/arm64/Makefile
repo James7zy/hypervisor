@@ -14,6 +14,7 @@ arch-objs := \
     arch/arm64/vmexit/vmexit.o \
     arch/arm64/vmexit/vmexit_asm.o \
     arch/arm64/vmexit/data_abort.o \
+    arch/arm64/vmexit/data_abort_mmio.o \
     arch/arm64/vmexit/vpsci.o \
     arch/arm64/vgic/vgic.o \
     arch/arm64/vgic/vgic_sgi.o \
