@@ -12,19 +12,19 @@ void abort_snapshot_read(struct abort_snapshot *fault, u64 esr, u64 elr)
     asm volatile("mrs %0, hpfar_el2" : "=r"(fault->hpfar));
 }
 
-/*
- * Diagnostic for a data abort no MMIO handler claimed: which IPA, which fault.
- * The caller then parks this vCPU (HV-012 G5) — reporting and stopping are
- * separate so the vCPU state machine stays in vmexit.c.
- */
+/* One record binds fault identity, syndrome and address validity. */
 void data_abort_report(const struct abort_snapshot *fault)
 {
-    u32 iss = (u32)(fault->esr & 0x01FFFFFFU);
+    struct abort_info info = abort_classify(fault);
+    struct vcpu *v = current_vcpu();
 
-    /* VM-local vCPU index, not the pCPU: current_vcpu_id() is the physical
-     * core (the repo's "[hv] ... cpu%u" convention); a fault on a shared pCPU
-     * would otherwise be reported against the wrong vCPU. */
-    printk("[hv] s2 fault: vCPU%u ipa=0x%lx fsc=0x%x ec=0x%x\n",
-           (unsigned)current_vcpu()->vcpu_idx, ((fault->hpfar & 0xFFFFFFFFFFF0ULL) << 8) | (fault->far & 0xFFFULL),
-           (unsigned)(iss & 0x3fU), (unsigned)((fault->esr >> 26) & 0x3FU));
+    printk("[hv] s2 fault: vCPU%u ipa=0x%lx fsc=0x%x ec=0x%x "
+           "class=%s vm=%u vcpu=%u pcpu=%u ipa_valid=%u far_valid=%u "
+           "far=0x%lx elr=0x%lx esr=0x%lx wnr_valid=%u wnr=%u\n",
+           (unsigned)v->vcpu_idx, info.ipa_valid ? info.ipa : 0,
+           info.fsc, info.ec, info.class_name, (unsigned)v->owner->id,
+           (unsigned)v->vcpu_idx, (unsigned)current_vcpu_id(),
+           (unsigned)info.ipa_valid, (unsigned)info.far_valid, fault->far,
+           fault->elr, fault->esr, (unsigned)info.wnr_valid,
+           (unsigned)((fault->esr >> 6) & 1));
 }
