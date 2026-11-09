@@ -1,0 +1,5 @@
+Hello from EL2
+SVM: s2fault vm0 reading unmapped IPA
+[hv] s2 fault: vCPU0 ipa=0x80000000 fsc=0x5 ec=0x24
+SVM: hello from VM1
+SVM HVC: done (x1=0x10001)

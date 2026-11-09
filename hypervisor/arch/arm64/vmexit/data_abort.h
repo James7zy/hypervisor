@@ -14,4 +14,8 @@
  */
 int mmio_handle_data_abort(struct arch_regs *regs, u64 esr);
 
+/* Log an unhandled data abort as `[hv] s2 fault: vCPU<x> ipa=… fsc=… ec=…`
+ * (ipa/fsc/ec of the faulting access). The caller parks the vCPU. */
+void data_abort_report(u64 esr);
+
 #endif /* HV_ARM64_DATA_ABORT_H */

@@ -3,7 +3,6 @@
 #include <printk.h>
 #include <vm.h>
 #include <percpu.h>
-#include <cpu.h>
 #include <sched.h>
 #include <vgic.h>               /* vgic_has_pending (M11 B2) */
 #include <arch/hypercall.h>
@@ -331,6 +330,23 @@ static void handle_sysreg_trap(struct arch_regs *regs, u64 esr)
     regs->elr_el2 += 4ULL;
 }
 
+/*
+ * Stop ONLY the current vCPU (HV-011 G5 / HV-012). The pCPU unwinds to its run
+ * loop and keeps scheduling other vCPUs — a guest that faults must never take
+ * the pCPU, and with it any co-resident VM, down. Same state-machine edge as
+ * PSCI CPU_OFF (vpsci.c), so a later CPU_ON can revive this vCPU.
+ */
+static void park_current_vcpu(void) __attribute__((noreturn));
+
+static void park_current_vcpu(void)
+{
+    struct vcpu *v = current_vcpu();
+
+    (void)vcpu_state_step(&v->state, VCPU_EV_OFF);
+    __asm__ volatile("dsb ish" ::: "memory");
+    hv_restore();   /* unwind to this pCPU's run loop; never erets back */
+}
+
 void handle_exit(struct arch_regs *regs, u64 esr)
 {
     u32 ec = (u32)(esr >> 26) & 0x3FU;
@@ -351,11 +367,15 @@ void handle_exit(struct arch_regs *regs, u64 esr)
     case EC_DABT_LOW: /* → MMIO trap-and-emulate */
         if (mmio_handle_data_abort(regs, esr) == 0)
             return;   /* handled: ELR advanced; el1_sync_handler erets back */
-        /* fall through to the diagnostic + park on no handler / ISV=0 */
-        /* fallthrough */
+        /* Unmapped IPA or permission fault with no MMIO handler behind it: the
+         * guest's own fault to die of. Report it, park this vCPU. */
+        data_abort_report(esr);
+        park_current_vcpu();
     default:
+        /* Unknown EC: same rule — a guest that trips an exit we do not
+         * implement loses its own vCPU, not the pCPU. */
         printk("[hv] unexpected exit cpu%u EC=0x%x ESR=0x%lx ELR=0x%lx\n",
                (unsigned)current_vcpu_id(), (unsigned)ec, esr, regs->elr_el2);
-        cpu_arch_halt();
+        park_current_vcpu();
     }
 }
