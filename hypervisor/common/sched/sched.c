@@ -81,12 +81,9 @@ int sched_vm_pause(struct vm *v)
 
     if (r != 0)
         return r;
-    /* Only a resident vCPU needs telling: it is the one whose pCPU would stay
-     * in the guest until its next quantum. Queued ones are already about to be
-     * looked at, and pick drops them (HV-004 F2). */
-    for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++)
-        if (__atomic_load_n(&v->vcpu[i].state, __ATOMIC_ACQUIRE) == VCPU_RUNNING)
-            cpu_arch_kick(v->config->vcpu_pcpu[i]);
+    for (u32 p = 0; p < NR_CPUS; p++)
+        if (vm_has_pcpu(v, p))
+            cpu_arch_kick(p);
     return 0;
 }
 
@@ -113,6 +110,45 @@ int sched_vm_resume(struct vm *v)
     return 0;
 }
 
+/* Only the owner loop excludes a resident and publishes its execution ack. */
+static void sched_pause_exclude(struct vcpu *v)
+{
+    VM_PAUSE_TEST_POINT(PAUSE_BEFORE_EXCLUDE, v->owner);
+    if (vcpu_state_step(&v->state, VCPU_EV_YIELD) == 0)
+        sched_enqueue(v); /* unconditional: RESUME may already have scanned RUNNING */
+}
+
+static void sched_pause_safe_point(u32 pcpu, struct vcpu *prev)
+{
+    for (u32 i = 0; i < NR_VMS; i++) {
+        struct vm *m = &vm[i];
+        if (!vm_has_pcpu(m, pcpu))
+            continue;
+        u64 s = __atomic_load_n(&m->pause_state, __ATOMIC_ACQUIRE);
+        if (!(s & 1ULL))
+            continue;
+        if (prev != NULL && prev->owner == m &&
+            __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNING)
+            sched_pause_exclude(prev);
+        VM_PAUSE_TEST_POINT(PAUSE_BEFORE_ACK, m);
+        __atomic_store_n(&m->pause_ack[pcpu], s, __ATOMIC_RELEASE);
+    }
+}
+
+bool sched_pause_pending(u32 pcpu)
+{
+    for (u32 i = 0; i < NR_VMS; i++) {
+        struct vm *m = &vm[i];
+        if (!vm_has_pcpu(m, pcpu))
+            continue;
+        u64 s = __atomic_load_n(&m->pause_state, __ATOMIC_ACQUIRE);
+        if ((s & 1ULL) &&
+            __atomic_load_n(&m->pause_ack[pcpu], __ATOMIC_ACQUIRE) != s)
+            return true;
+    }
+    return false;
+}
+
 /* The one scheduler loop (M11 B2, gate-2 bill 1 hoist): both pCPUs run this.
  * Shape per the B1 rulings: RUNNING fast path (no-yield unwinds re-enter
  * prev directly), pick with idle-continue and swept-skip, put(prev) only
@@ -136,6 +172,7 @@ void sched_loop(u32 pcpu)
             if (vcpu_state_step(&prev->state, VCPU_EV_YIELD) == 0)
                 sched_yield_cur();
         }
+        sched_pause_safe_point(pcpu, prev);
         if (prev != NULL &&
             __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNING) {
             /* Unwind without a state change (HC_GUEST_DONE park; a timer
@@ -144,22 +181,25 @@ void sched_loop(u32 pcpu)
              * (RR dequeues at pick; only yield re-enqueues) — re-enter it
              * directly. Picking here would see an empty queue and idle
              * forever. */
+            if (vm_is_paused(prev->owner)) {
+                sched_pause_exclude(prev);
+                continue;
+            }
             vcpu_arch_run(prev);
             continue;
         }
         v = sched_pick(pcpu);
+        VM_PAUSE_TEST_POINT(PAUSE_AFTER_PICK, v ? v->owner : NULL);
         if (v == NULL) {
-            /* Idle window (M11 B2, tester N1 hardening): unmasks FIRST, then
-             * re-checks the queue — an interrupt that was already pending
-             * lands its handler rounds BETWEEN the unmask and the check, so
-             * the check observes the wake and skips the wfi. (Residual
-             * microsecond window: a wake completing both handler rounds in
-             * the check→wfi gap — recorded in ADR-0019.) No locks held here:
-             * the window is interruptible by design. */
+            /* Keep IRQ masked through the last check and sleep: a unique
+             * kick must remain pending until WFI has completed or is skipped. */
             percpu[pcpu].idle_window = 1;
-            cpu_arch_irq_enable();
-            if (sched_idle_may_sleep(pcpu))
+            VM_PAUSE_TEST_POINT(PAUSE_IDLE_CHECK, NULL);
+            if (sched_idle_may_sleep(pcpu)) {
+                VM_PAUSE_TEST_POINT(PAUSE_IDLE_SLEEP, NULL);
                 cpu_arch_idle();
+            }
+            cpu_arch_irq_enable(); /* includes interrupt-recognition synchronization */
             cpu_arch_irq_disable();
             percpu[pcpu].idle_window = 0;
             continue;
@@ -215,6 +255,10 @@ void sched_loop(u32 pcpu)
          * switch-in and a self re-pick; the RUNNING fast path above inherits
          * the deadline it already has (re-arming it would restart the
          * quantum on every trap-free unwind). */
+        if (vm_is_paused(v->owner)) {
+            sched_pause_exclude(v);
+            continue;
+        }
         cpu_arch_timer_tick_arm();
         vcpu_arch_run(v);
     }
@@ -242,18 +286,8 @@ bool sched_queue_empty(u32 pcpu)
     return e;
 }
 
-/*
- * ADVISORY, LOCK-FREE queue probe for the idle window (gate-2 Critical-1):
- * the window runs with IRQs unmasked, and taking q_lock there lets an
- * interrupt's enqueue path self-deadlock on the held ticket (both written
- * lock contracts forbid it; TCG never delivers IRQs mid-critical-section,
- * so only hardware would show the hang). A bare acquire read of the u8
- * count races only with the locked enqueue/dequeue; a stale-empty read
- * degrades into the already-recorded, self-healing check→wfi residual
- * (the enqueue side kicks after publishing). A stale-nonempty read merely
- * skips one idle iteration.
- */
+/* IRQ masked, no lock held across the subsequent sleep/IRQ window. */
 bool sched_idle_may_sleep(u32 pcpu)
 {
-    return __atomic_load_n(&queues[pcpu].count, __ATOMIC_ACQUIRE) == 0;
+    return sched_queue_empty(pcpu) && !sched_pause_pending(pcpu);
 }

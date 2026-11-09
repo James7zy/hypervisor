@@ -31,17 +31,14 @@ struct vcpu  *sched_pick(u32 pcpu);         /* rotate out the next; NULL if idle
 void          sched_yield_cur(void);        /* re-enqueue the current vCPU */
 void          sched_enqueue(struct vcpu *v);/* CPU_ON / wake (idempotent) */
 void          sched_wake(struct vcpu *v);  /* BLOCKED only: WAKE + enqueue + kick */
-/* Suspend/resume a VM's scheduling (HV-004). Pause flips the VM flag and kicks
- * every RUNNING vCPU off its pCPU; the kick's IRQ context only unwinds, so the
- * switch-away happens in that pCPU's sched_loop, which drops the vCPU at pick.
- * Resume flips it back and re-queues the RUNNABLE vCPUs (BLOCKED stays blocked:
- * its own event owns that wake) plus a kick for a pCPU sitting in idle.
- * Return 0, or nonzero when the VM was already in that state. */
+/* Asynchronous pause requests every affinity CPU's safe point. Resume queues
+ * RUNNABLE/ON_PENDING only. Nonzero means repeated state, CAS loss or exhaustion. */
 int           sched_vm_pause(struct vm *v);
 int           sched_vm_resume(struct vm *v);
 bool          sched_queue_empty(u32 pcpu); /* locked probe (WFI "alone?" leg) */
-/* Lock-free advisory probe — ONLY inside the unmasked idle window (see
- * sched.c: the locked probe there self-deadlocks on hardware). */
+/* Pending execution confirmation, including non-current VMs (IRQ-safe read). */
+bool          sched_pause_pending(u32 pcpu);
+/* Final sleep predicate; caller must have local IRQ masked. */
 bool          sched_idle_may_sleep(u32 pcpu);
 /* The scheduler run loop both pCPUs drop into after their bring-up (M11 B2
  * hoist; noreturn). */

@@ -49,9 +49,14 @@ struct vm {
                                          file-static state in arch code
                                          and in dm/vuart.c */
     const struct vm_config *config;
-    bool                   paused;    /* HV-004: suspend flag, a scheduling
-                                         predicate -- see vm_is_paused() */
+    u64                    pause_state; /* low bit: paused; high 63: epoch */
+    u64                    pause_ack[NR_CPUS]; /* only affinity pCPU writes its slot */
 };
+
+_Static_assert(_Alignof(struct vm) >= 8 &&
+               __builtin_offsetof(struct vm, pause_state) % 8 == 0 &&
+               __builtin_offsetof(struct vm, pause_ack) % 8 == 0,
+               "pause atomics must be naturally aligned");
 
 extern struct vm vm[NR_VMS];
 
@@ -77,39 +82,47 @@ u32  vm_online_vcpus(const struct vm *v);
 /* Service VM = VM0: static topology (ADR-0014), not a config field (E3). */
 bool vm_is_service(const struct vm *v);
 
-/*
- * Suspend state (HV-004 F1: two states only, so no enum until VM create/
- * destroy brings the rest). `paused` is a SCHEDULING predicate, not "the guest
- * is stopped": sched_loop drops a paused VM's vCPU at pick and sched_vm_pause
- * kicks the resident off its pCPU, so the effect is asynchronous -- a hypercall
- * can return before the target has left the hardware.
- *
- * Defined here rather than in vm.c because vm.c owns the vm[] array that the
- * host scheduler test cannot link; the flag is one bool and these are all of
- * its transitions.
- * Returns 0 on a real transition, VM_EALREADY if already in that state (the
- * hypercall layer maps it to HC_EBUSY).
- */
+/* Host-only deterministic interleavings; no hook or argument evaluation in
+ * production builds. The host test force-includes its private declaration. */
+#ifndef VM_PAUSE_TEST_POINT
+#define VM_PAUSE_TEST_POINT(point, v) ((void)0)
+#endif
+
+/* Pausing is an asynchronous execution request, never permission to free RAM. */
 #define VM_EALREADY (-1)
+
+bool vm_has_pcpu(const struct vm *v, u32 pcpu);
 
 static inline bool vm_is_paused(const struct vm *v)
 {
-    return __atomic_load_n(&v->paused, __ATOMIC_ACQUIRE);
+    return (__atomic_load_n(&v->pause_state, __ATOMIC_ACQUIRE) & 1ULL) != 0;
 }
 
 static inline int vm_pause(struct vm *v)
 {
-    if (__atomic_exchange_n(&v->paused, true, __ATOMIC_ACQ_REL))
+    u64 s = __atomic_load_n(&v->pause_state, __ATOMIC_ACQUIRE);
+
+    if ((s & 1ULL) || (s >> 1) == (~0ULL >> 1))
         return VM_EALREADY;
-    return 0;
+    VM_PAUSE_TEST_POINT(PAUSE_BEFORE_CAS, v);
+    return __atomic_compare_exchange_n(&v->pause_state, &s, s + 3, false,
+                                      __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)
+           ? 0 : VM_EALREADY;
 }
 
 static inline int vm_resume(struct vm *v)
 {
-    if (!__atomic_exchange_n(&v->paused, false, __ATOMIC_ACQ_REL))
+    u64 s = __atomic_load_n(&v->pause_state, __ATOMIC_ACQUIRE);
+
+    if (!(s & 1ULL))
         return VM_EALREADY;
-    return 0;
+    VM_PAUSE_TEST_POINT(RESUME_BEFORE_CAS, v);
+    return __atomic_compare_exchange_n(&v->pause_state, &s, s & ~1ULL, false,
+                                      __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)
+           ? 0 : VM_EALREADY;
 }
+
+void vm_pause_query(const struct vm *v, bool *paused, bool *quiesced);
 
 /*
  * VM/vCPU hooks every arch implements (ADR-0015); no weak defaults.

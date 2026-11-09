@@ -13,8 +13,7 @@
 #ifndef SVM_LIB_H
 #define SVM_LIB_H
 
-/* Keep in sync with include/hypercall.h: SMCCC vendor range (0x87000000+). */
-#define HC_GUEST_DONE 0x87000001UL
+#include <hypercall.h>
 #define PSCI_VERSION  0x84000000UL
 
 #define SVM_ENTRY __attribute__((section(".text.start")))

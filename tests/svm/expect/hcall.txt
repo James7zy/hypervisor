@@ -1,8 +1,8 @@
-HCALL: vm0 version 0.1
+HCALL: vm0 version 0.2
 HCALL: vm0 self vmid=0 service=1 online=1
 HCALL: vm0 query peer rc=0
 HCALL: vm0 unused rc=-3
-HCALL: vm1 version 0.1
+HCALL: vm1 version 0.2
 HCALL: vm1 self vmid=1 service=0 online=1
 HCALL: vm1 query peer rc=-2
 HCALL: vm1 unused rc=-3

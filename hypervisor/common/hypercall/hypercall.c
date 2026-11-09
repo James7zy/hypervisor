@@ -10,7 +10,7 @@
 
 /* The ABI version this build implements. */
 #define HC_VERSION_MAJOR 0U
-#define HC_VERSION_MINOR 1U
+#define HC_VERSION_MINOR 2U
 
 /*
  * Caller classes a table entry can require. Every VM is HC_ROLE_ANY; the
@@ -72,7 +72,7 @@ static s64 hc_version(struct vm *caller, u64 a1, u64 a2, u64 *ret)
 }
 
 /*
- * State word: vmid | is-service << 16 | online vCPUs << 17 | paused << 32.
+ * State word: vmid | is-service << 16 | online vCPUs << 17 | paused << 32 | exec_quiesced << 33.
  * Derived state only: fields are added to this word, never moved.
  */
 static s64 hc_vm_query(struct vm *caller, u64 a1, u64 a2, u64 *ret)
@@ -91,17 +91,21 @@ static s64 hc_vm_query(struct vm *caller, u64 a1, u64 a2, u64 *ret)
     if (target != caller && !vm_is_service(caller))
         return HC_EPERM;
 
+    bool paused, quiesced;
+    vm_pause_query(target, &paused, &quiesced);
+
     *ret = (u64)target->id
            | ((vm_is_service(target) ? 1ULL : 0ULL) << 16)
            | ((u64)vm_online_vcpus(target) << 17)
-           | ((vm_is_paused(target) ? 1ULL : 0ULL) << 32);
+           | (paused ? HC_VM_QUERY_PAUSED : 0)
+           | (quiesced ? HC_VM_QUERY_EXEC_QUIESCED : 0);
     return HC_OK;
 }
 
 /*
  * Suspend/resume (HV-004 F2/F3). Both are Service-VM-only (table roles) and
  * asynchronous: the answer reports the state transition, not a stopped VM.
- * EBUSY means the target is already where the call wanted it.
+ * EBUSY also covers CAS contention and exhausted pause epochs.
  */
 static s64 hc_vm_pause(struct vm *caller, u64 a1, u64 a2, u64 *ret)
 {

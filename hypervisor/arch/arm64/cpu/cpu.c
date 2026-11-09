@@ -63,15 +63,13 @@ s64 cpu_arch_power_on(u32 pcpu)
 
 void cpu_arch_idle(void)
 {
-    /* Bare wfi: the CALLER opened the interrupt window (see sched_loop's
-     * idle branch) and re-checks its wake condition on return. A pending
-     * IRQ completes wfi even if it were masked. */
-    __asm__ volatile("wfi");
+    /* The caller keeps IRQ masked; an eligible pending IRQ ends WFI. */
+    __asm__ volatile("dsb sy; wfi" ::: "memory");
 }
 
 void cpu_arch_irq_enable(void)
 {
-    __asm__ volatile("msr daifclr, #2" ::: "memory");
+    __asm__ volatile("msr daifclr, #2; isb" ::: "memory");
 }
 
 void cpu_arch_irq_disable(void)
@@ -81,5 +79,6 @@ void cpu_arch_irq_disable(void)
 
 void cpu_arch_kick(u32 pcpu)
 {
+    __asm__ volatile("dsb ish" ::: "memory");
     gic_kick_pcpu(pcpu);
 }

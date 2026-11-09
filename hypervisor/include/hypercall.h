@@ -22,7 +22,7 @@ struct vm;
 #define HC_EPERM    -2
 #define HC_ENOSYS   -3
 #define HC_ENODEV   -4
-#define HC_EBUSY    -5   /* HV-004: the VM is already in the asked-for state */
+#define HC_EBUSY    -5   /* repeated state, CAS contention or epoch exhaustion */
 
 #define HVC_VENDOR_BASE 0x87000000U
 #define HC_ID(module, index) \
@@ -39,7 +39,11 @@ struct vm;
 #define HC_VM_PAUSE     HC_ID(HC_MOD_VM, 1)
 #define HC_VM_RESUME    HC_ID(HC_MOD_VM, 2)
 
-/* Byte width of the vmid field in the answers that carry one (bits[15:0]). */
+/* QUERY execution confirmation is not a resource-reclamation guarantee. */
+#define HC_VM_QUERY_PAUSED        (1ULL << 32)
+#define HC_VM_QUERY_EXEC_QUIESCED (1ULL << 33)
+
+/* Width of the vmid field in the answers (bits[15:0]). */
 #define HC_VMID_BITS 16
 
 /*

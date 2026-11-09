@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: TBD */
-/* T1 behavioral RED: real sched/vm/hypercall code, only hardware is replaced. */
+/* T1 behavioral regression: real sched/vm/hypercall, only hardware replaced. */
 #include <setjmp.h>
 #include <sched.h>
 #include <cpu.h>
@@ -17,8 +17,7 @@ static struct vcpu *resident;
 static unsigned entries;
 static unsigned kicks[NR_CPUS];
 static bool pause_in_load;
-/* Test the approved wire bit without introducing the T2 production API. */
-#define EXPECT_EXEC_QUIESCED (1ULL << 33)
+#define EXPECT_EXEC_QUIESCED HC_VM_QUERY_EXEC_QUIESCED
 
 static u64 query(void)
 {
@@ -135,7 +134,7 @@ static void query_closure_case(void)
     TEST_ASSERT(!(query() & EXPECT_EXEC_QUIESCED));
     run_until_idle(1);
     u64 ret = query();
-    TEST_ASSERT(ret & (1ULL << 32));
+    TEST_ASSERT(ret & HC_VM_QUERY_PAUSED);
     TEST_ASSERT((ret & 0xffffffffULL) == 1); /* id=1, non-service, all OFF */
     TEST_ASSERT(ret & EXPECT_EXEC_QUIESCED);
     printf("query-closure: after both scheduler loops query=0x%llx\n",

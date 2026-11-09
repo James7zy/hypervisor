@@ -8,7 +8,6 @@
 
 int tests_run;
 int tests_failed;
-struct vm vm[NR_VMS];
 struct percpu percpu[NR_CPUS];
 struct percpu *x86_this_percpu = &percpu[0];
 static const struct vm_config config = { .vcpu_pcpu = {0, 0} };
