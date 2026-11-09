@@ -48,6 +48,10 @@ static inline void mmio_write8(unsigned long addr, u8 val)
 
 void secondary_main(u32 id)
 {
+    /* Full known value: reset HCR is UNKNOWN; DAIF stays masked. */
+    SYSREG_WRITE(HCR_EL2, HCR_EL2_HOST_BASE);
+    __asm__ volatile("isb" ::: "memory");
+
     /* EL2 Stage-1 MMU: the shared identity-map table was already built by
      * the boot CPU's el2_mmu_init(); this core only programs its own
      * per-PE MAIR/TCR/TTBR0/SCTLR before touching any MMIO. */
