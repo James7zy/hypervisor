@@ -1,8 +1,8 @@
 # HV-004 暂停执行确认实施计划
 
 [设计](../specs/2026-11-09-hv004-pause-confirmation-design.md)，基线 `3b8b9a8`。
-独立设计复核已 PASS，仅获准 T1；具体证明与行为 RED 复核通过后才可进入 T2。
-不将执行确认扩大为资源回收。两工作日是时间盒，不是完成保证。
+T1 同源 RED 已独立验证、软件证明有条件通过，父批准spec最小HCR修订及T2实施；
+不是实现验收，硬件观察仍须补齐。不将执行确认扩大为资源回收；两工作日时间盒不顺延。
 
 ## T1：协议落点与行为 RED
 
@@ -20,8 +20,12 @@
 
 ## T2：代次确认与 ABI GREEN
 
+- 两个既有ARM初始化入口在EL2 MMU前写HCR HOST_BASE=0x80000038并ISB、保持DAIF屏蔽；
+  现有sysreg.h收敛bit/组合，guest reset使用GUEST_BASE=0x800c6039，保持原guest行为。
+  不增加公共hook/每次idle切HCR；核对CPU_ON/run shadow链和全部关键位前提。
 - 初始化 per-VM 暂停代次和每 affinity pCPU确认状态；保留 vm_is_paused()公共读入口。
 - PAUSE请求所有不同affinity核经过安全点，不靠RUNNING采样推断完成；各核只能确认自己。
+  kick处理检查本核任一相关VM待确认，不局限当前owner；非idle请求unwind，idle窗口内不从旧帧解栈。
 - 覆盖所有guest-entry路径；暂停排除RUNNING时YIELD成功后无条件幂等入队，再发布ack。
   pick重新读取暂停状态，保持prev/cur_vcpu/launched硬件归属。
 - idle最终队列/待确认检查到WFI间IRQ屏蔽，返回/跳过后在idle_window内开放并处理IRQ，
@@ -40,6 +44,9 @@
 - 冻结三个场景：dual无timer OFF-secondary→CPU_ON双核闭环；xvm2共享/定时阻塞唤醒闭环；
   共享核并发控制/CPU_ON/拒绝路径（不混HOLD oracle）。每场景三轮，九次专用启动，不做笛卡尔积。
   保存QMP原回复；解析/阶段观察自检覆盖错ID、异步事件、错阶段、缺失/超时/错误/截断/全机停止。
+- 将HCR实际证据嵌入上述场景：从未guest-entry/无timer核的初始HCR/DAIF/GIC条件及
+  唯一kick→本核同代ack，guest首次run后路由不回退；boot无候选路径同步覆盖。
+  测试观察不增加生产ABI，不能让诊断timer为无timer窗口提供兜底。
 - 专用目标纳入make test；统计目标数与实际启动数，不以轮询次数当QEMU启动。
 
 ## T4：独立验收及发布
@@ -55,7 +62,9 @@
 - `include/vm.h`、`common/vm/vm.c`：状态与初始化；必要的最小同源协议实现。
 - `include/sched.h`、`common/sched/sched.c`：安全点/entry/请求与恢复。
 - `include/hypercall.h`、`common/hypercall/hypercall.c`：QUERY位、版本、权限保持。
-- `arch/arm64/irq/irq_handler.c`：仅确有必要才改unwind，保留idle-window防护。
+- `arch/arm64/irq/irq_handler.c`：共享核任一相关VM待确认时kick请求unwind，保留idle-window防护。
+- `arch/arm64/include/arch/sysreg.h`、`cpu/secondary.c`、`guest/vm.c`及`cpu/cpu.c`：
+  已批准的HCR常量/两个初始化写点/guest shadow收敛；核对head.S与run汇编，不扩大boot重构。
 - `include/cpu.h`、ARM `cpu/cpu.c`：idle/IRQ同步与kick发布屏障的最小契约；复核所有kick调用者。
   x86 stub保持对应接口，无新增公共barrier抽象。
 - host sched/hypercall测试与替身、新协议交错测试；SVM hcall期望、专用控制/计数guest/linker/runner。
