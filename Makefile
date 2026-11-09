@@ -376,7 +376,17 @@ $(BUILD_DIR)/host/stage2_build_linux_test $(BUILD_DIR)/host/stage2_build_svm_tes
 	    $(if $(findstring _svm_,$@),-DCONFIG_GUEST_SVM=1 -DCONFIG_SVM_XVM2=1) \
 	    -o $@ $(HOST_STAGE2_BUILD_SRCS)
 
-host-test: $(BUILD_DIR)/host/host_test $(BUILD_DIR)/host/sched_test $(BUILD_DIR)/host/vcpu_state_race_test $(BUILD_DIR)/host/hypercall_test $(BUILD_DIR)/host/s2_test $(BUILD_DIR)/host/stage2_build_linux_test $(BUILD_DIR)/host/stage2_build_svm_test
+HOST_ABORT_SRCS := tests/host/data_abort_test.c \
+    hypervisor/arch/arm64/vmexit/data_abort_mmio.c hypervisor/common/io/mmio.c
+
+$(BUILD_DIR)/host/data_abort_test: $(HOST_ABORT_SRCS) tests/host/host_test.h \
+    hypervisor/arch/arm64/vmexit/data_abort.h hypervisor/arch/arm64/include/arch/vm.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(HOST_TEST_CFLAGS) -Ihypervisor/arch/arm64/include \
+	    -Ihypervisor/arch/arm64/vmexit -o $@ $(HOST_ABORT_SRCS)
+
+host-test: $(BUILD_DIR)/host/data_abort_test $(BUILD_DIR)/host/host_test $(BUILD_DIR)/host/sched_test $(BUILD_DIR)/host/vcpu_state_race_test $(BUILD_DIR)/host/hypercall_test $(BUILD_DIR)/host/s2_test $(BUILD_DIR)/host/stage2_build_linux_test $(BUILD_DIR)/host/stage2_build_svm_test
+	$(BUILD_DIR)/host/data_abort_test
 	$(BUILD_DIR)/host/host_test
 	$(BUILD_DIR)/host/sched_test
 	$(BUILD_DIR)/host/vcpu_state_race_test
