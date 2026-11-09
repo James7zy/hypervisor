@@ -21,6 +21,25 @@
 > 不反映现状。设计决定见 [ADR-0014](../../adr/0014-multi-vm-static-partition-el2-console.md)、
 > [ADR-0015](../../adr/0015-arch-boundary-core-vs-arch.md)。
 
+## 初始 RAM 授权边界（XL-003，2026-11-08）
+
+`stage2_init()` 调用 ARM64 纯逻辑 `stage2_build()`，按真实 `vm_config` 的
+`mem_base/ram_pa/mem_size` 精确建表，不再向下取整 PA 或固定授权 1 GiB。
+
+| profile | RAM IPA（半开区间） | VM0 backing PA | VM1 backing PA |
+|---|---|---|---|
+| Linux | `[0x40000000,0x50000000)` | `[0x80000000,0x90000000)` | `[0xc0000000,0xd0000000)` |
+| SVM | `[0x40200000,0x40400000)` | `[0x40200000,0x40400000)` | `[0xc0200000,0xc0400000)` |
+
+生产自检遍历所有有效叶，检查 RAM 覆盖、OA 与属性，并保留设备窗口/GIC/UART 洞检查。
+QEMU linker 将含 BSS/boot stack 的 HV 末端限制在 SVM backing 起点之前。
+`make test-qemu-s2bounds` 分三次启动验证 HV 镜像 IPA、RAM 授权结束地址、peer backing
+IPA 的访问被拒绝，且同 pCPU VM1 继续完成；host 另编译真实 Linux/SVM 配置检查全部叶。
+
+这只修复当前静态 profile 的 RAM 边界。低地址设备宽映射、DMA、运行期 TLBI、动态配置
+授权与 HSM/DM 布局协议仍未由此解决。见 [ADR-0026](../../adr/0026-initial-stage2-ram-authorization.md)
+及[独立验收](../../reports/2026-11-08-xl003-ram-bounds-verification.md)。
+
 ## 1. 模块关系
 
 代码分成**架构中立层**和 **`arch/`**。中立层只通过 `*_arch_*` 钩子和 `<arch/xxx.h>` 访问
@@ -46,7 +65,7 @@ flowchart TB
         HEAD["boot/<br/>head.S vectors.S"]
         CPU["cpu/<br/>cpu.c secondary.c psci.c"]
         GUEST["guest/vm.c<br/>vm_arch_* vcpu_arch_*"]
-        MMU["mmu/stage2.c"]
+        MMU["mmu/stage2.c<br/>stage2_build.c：初始建表与授权自检"]
         EXIT["vmexit/<br/>vmexit.c data_abort.c<br/>vpsci.c vmexit_asm.S"]
         IRQ["irq/<br/>gic_v3.c irq_handler.c"]
         VGIC["vgic/<br/>vgic.c vgic_sgi.c vgic_v3_mmio.c"]
