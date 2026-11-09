@@ -1,6 +1,8 @@
 # Map guest Stage-2 with two static 1 GB block descriptors
 
-> **Status:** Accepted. **Milestone:** M1 (introduced); refined through M3.x;
+> **Status:** Partially superseded：固定 RAM 1 GiB 映射与 PA 对齐取整由
+> [ADR-0026](0026-initial-stage2-ram-authorization.md) 替代；下文保留历史决定。
+> **Milestone:** M1 (introduced); refined through M3.x;
 > first validated by a real Linux boot on 2026-06-19 (which corrected the
 > `ram_pa` alignment — see below).
 
