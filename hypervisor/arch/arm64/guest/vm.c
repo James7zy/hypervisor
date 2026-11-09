@@ -61,9 +61,7 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg)
      * letting it reach EL3 (ADR-0017; no-op on QEMU, which forces TSC RES0
      * without EL3, but live on RK3588's EL3/TF-A).
      */
-    v->arch.hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
-                      (1ULL << 13) | (1ULL << 14) | (1ULL << 18) |
-                      (1ULL << 19) | (1ULL << 31);
+    v->arch.hcr_el2 = HCR_EL2_GUEST_BASE;
 
     vgic_init(v);
 }

@@ -15,6 +15,10 @@ extern char secondary_entry[];
 
 void cpu_arch_init(void)
 {
+    /* Full known value: reset HCR is UNKNOWN; DAIF stays masked. */
+    SYSREG_WRITE(HCR_EL2, HCR_EL2_HOST_BASE);
+    __asm__ volatile("isb" ::: "memory");
+
     /* EL2 Stage-1 MMU, identity map, before anything else touches memory
      * (M11 prerequisite A slice 1): a page-table mistake must show up here,
      * immediately, not get mixed up with later state. */
