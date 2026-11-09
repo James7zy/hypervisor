@@ -17,9 +17,10 @@
 
 ## 通用(根目录)
 
-- [commit-conventions.md](commit-conventions.md) — **提交信息规范**:`type(scope): subject`
-  标题 + 正文 + `Test:` / `Bug:` / `Fixed:` 尾部标签,参考 Fuchsia 的 commit message style
-  并按本工程调整(无 Gerrit,不写 `Change-Id:`)。`CLAUDE.md` §提交信息指向这里。
+- [commit-conventions.md](commit-conventions.md) — **提交信息规范**:`[领域][专项] 组件: 摘要`
+  标题 + 可选的多领域标签块 + 正文 + `Test:` / `Bug:` / `Fixed:` 尾部标签。格式定义在
+  [scripts/commit-message/commit-message.md](../../scripts/commit-message/commit-message.md),
+  由 `check-commit-message` 强制检查。`CLAUDE.md` §提交信息指向这里。
 - [superpowers.md](superpowers.md) — Claude Code 本地 skills 与 pi 项目包的
   Superpowers 安装、使用、验证与更新；Claude 不使用插件，不全局启用。
 - [mermaid-gotchas.md](mermaid-gotchas.md) — Mermaid 避坑清单:如何用
