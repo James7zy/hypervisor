@@ -3,6 +3,8 @@
 > **Status:** Partially superseded：初始 RAM 旧值等价要求由
 > [ADR-0026](0026-initial-stage2-ram-authorization.md) 的精确授权检查替代；表池与 fault 裁定保留。
 > **Milestone:** H1 / HV-011+HV-012 第一刀（2026-11-08）。
+> fault 分流与地址诊断由 [ADR-0027](0027-abort-classification-and-startup-permissions.md) 补充：
+> 只有合格 translation 可模拟 MMIO，普通 permission 的 IPA 不保证有效；下文保留第一刀记录。
 
 ## 背景
 

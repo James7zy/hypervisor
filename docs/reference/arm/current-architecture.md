@@ -40,6 +40,22 @@ IPA 的访问被拒绝，且同 pCPU VM1 继续完成；host 另编译真实 Lin
 授权与 HSM/DM 布局协议仍未由此解决。见 [ADR-0026](../../adr/0026-initial-stage2-ram-authorization.md)
 及[独立验收](../../reports/2026-11-08-xl003-ram-bounds-verification.md)。
 
+## Abort 分类与启动前权限（HV-012，2026-11-09）
+
+ARM abort 入口共享单次 ESR/FAR/HPFAR/ELR 快照。只有合格的 Data translation fault
+（ISV=1、S1PTW=0、CM=0、有效 IPA）允许 MMIO 模拟；permission、access-flag、
+Instruction Abort 或未支持类别不模拟，报告后只停当前 vCPU。普通 permission 的
+HPFAR 不可靠，日志必须结合 `ipa_valid` 解读；FAR/WnR 也附有效性字段。
+
+正常生产 RAM 权限不因本片改变。`make test-qemu-s2perm` 专用 profile 在首次激活前
+设置两页 RO/XN，分两次启动验证真实写入/取指被拒绝，以及 fault 后同核 VM1 新进度。
+checker 同时验证完整事件行、身份/地址、raw ESR 一致性、禁止穿透与顺序。
+见 [ADR-0027](../../adr/0027-abort-classification-and-startup-permissions.md) 与
+[验收报告](../../reports/2026-11-09-hv012-abort-permissions-verification.md)。
+
+当前 `make test` 为 4 项非 QEMU 检查 + 15 个 QEMU 目标/18 次启动；`host-test` 和
+`test-linux` 仍独立。以上不代表运行期改权限/TLBI、LPA2 或真机属性已验收。
+
 ## 1. 模块关系
 
 代码分成**架构中立层**和 **`arch/`**。中立层只通过 `*_arch_*` 钩子和 `<arch/xxx.h>` 访问
@@ -228,7 +244,8 @@ sequenceDiagram
 |---|---|---|
 | `0x16` | guest 的 HVC | PSCI（SMCCC 服务号 `0x84`/`0xC4`）交给 `psci_handle`；调试 hypercall `HC_GUEST_DONE` 结束 SVM 测试；其它返回 `SMCCC_NOT_SUPPORTED` |
 | `0x18` | 系统寄存器 trap | `ICC_SGI*` 写入交给 `vgic_sgi_trap`（IPI）；`ICC_PMR/CTLR/RPR` 映射到 `ICH_VMCR_EL2` |
-| `0x24` | 数据异常（Stage-2 缺页） | `mmio_handle_data_abort` 解码 ISS，调用中立层 `mmio_bus_dispatch` |
+| `0x24` | lower-EL Data Abort | ARM 先分类/检查地址有效性，仅合格 translation 才调用 MMIO；未处理则报告并 park |
+| `0x20` | lower-EL Instruction Abort | 分类与有效性诊断，不模拟 MMIO，park 当前 vCPU |
 | 其它 | 未预期 | 打印并 `cpu_arch_halt` |
 
 **物理 IRQ**（`irq_handler.c` 的 `el2_irq_handler`，只分发）：
