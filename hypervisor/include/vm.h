@@ -114,8 +114,10 @@ static inline int vm_resume(struct vm *v)
 /*
  * VM/vCPU hooks every arch implements (ADR-0015); no weak defaults.
  */
-/* Per-VM arch setup (second-stage translation tables and their identifier). */
-void vm_arch_init(struct vm *m);
+/* Per-VM arch setup (second-stage translation tables and their identifier).
+ * Non-zero means the VM cannot run: vm_init reports it and leaves every vCPU
+ * OFF (never halts the pCPU). */
+int vm_arch_init(struct vm *m);
 /* Register the arch's emulated platform devices (e.g. the interrupt
  * controller) on the MMIO bus, once for all VMs. */
 void vm_arch_devices_init(void);

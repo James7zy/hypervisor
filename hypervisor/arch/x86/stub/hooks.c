@@ -50,9 +50,10 @@ void cpu_arch_timer_tick_arm(void)
 {
 }
 
-void vm_arch_init(struct vm *m)
+int vm_arch_init(struct vm *m)
 {
     (void)m;
+    return 0;
 }
 
 void vm_arch_devices_init(void)

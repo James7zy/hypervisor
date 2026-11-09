@@ -8,14 +8,7 @@
  * AArch64 EL2 implementations).
  */
 #include <types.h>
-
-/*
- * MAIR_EL2: index 0 = Device-nGnRE, index 1 = Normal WB, Read-Allocate,
- * Write-Allocate (inner+outer).
- */
-#define MAIR_ATTR_DEV_nGnRE   0x04ULL
-#define MAIR_ATTR_NORMAL_WB   0xFFULL
-#define MAIR_EL2_VALUE        (MAIR_ATTR_DEV_nGnRE | (MAIR_ATTR_NORMAL_WB << 8))
+#include "el2_mmu.h"
 
 /*
  * TCR_EL2, non-VHE (HCR_EL2.E2H==0) format. RES1 at bit23 AND bit31 — this

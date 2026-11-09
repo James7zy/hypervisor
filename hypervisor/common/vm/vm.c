@@ -53,7 +53,15 @@ void vm_init(void)
             m->vcpu[i].state    = VCPU_OFF;
         }
 
-        vm_arch_init(m);
+        if (vm_arch_init(m) != 0) {
+            /* Its Stage-2 tables could not be built (pool exhausted or the
+             * equivalence self-check failed): every vCPU stays OFF, so the
+             * VM never runs. One bad VM must not stop the others or the
+             * pCPU. */
+            printk("[hv] BUG: VM%u arch init failed; VM left OFF\n",
+                   (unsigned)vmi);
+            continue;
+        }
         vcpu_arch_reset(&m->vcpu[0], cfg);
         m->vcpu[0].state = VCPU_RUNNABLE;
 
