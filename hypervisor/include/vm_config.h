@@ -8,6 +8,7 @@
 struct vm_config {
     u32       vmid;
     uintptr_t entry;       /* guest address of the kernel entry point    */
+    /* Exact RAM authorization: [mem_base, mem_base + mem_size) -> ram_pa. */
     uintptr_t mem_base;    /* guest address of RAM base                  */
     uintptr_t ram_pa;      /* physical address backing mem_base (second stage)*/
     size_t    mem_size;
