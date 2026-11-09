@@ -352,11 +352,19 @@ $(BUILD_DIR)/host/hypercall_test: $(HOST_HCALL_SRCS) tests/host/host_test.h \
 	    -DCONFIG_NR_CPUS=1 -DCONFIG_NR_VMS=3 -ffunction-sections -fdata-sections \
 	    -Wl,--gc-sections -o $@ $(HOST_HCALL_SRCS)
 
-host-test: $(BUILD_DIR)/host/host_test $(BUILD_DIR)/host/sched_test $(BUILD_DIR)/host/vcpu_state_race_test $(BUILD_DIR)/host/hypercall_test
+HOST_S2_SRCS := tests/host/s2_test.c hypervisor/common/mmu/s2_table.c
+
+$(BUILD_DIR)/host/s2_test: $(HOST_S2_SRCS) tests/host/host_test.h \
+    hypervisor/include/s2_table.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(HOST_TEST_CFLAGS) -o $@ $(HOST_S2_SRCS)
+
+host-test: $(BUILD_DIR)/host/host_test $(BUILD_DIR)/host/sched_test $(BUILD_DIR)/host/vcpu_state_race_test $(BUILD_DIR)/host/hypercall_test $(BUILD_DIR)/host/s2_test
 	$(BUILD_DIR)/host/host_test
 	$(BUILD_DIR)/host/sched_test
 	$(BUILD_DIR)/host/vcpu_state_race_test
 	$(BUILD_DIR)/host/hypercall_test
+	$(BUILD_DIR)/host/s2_test
 
 TEST_BUILD_DIR := build/test-svm
 
