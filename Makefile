@@ -347,6 +347,25 @@ $(BUILD_DIR)/host/sched_test: $(HOST_SCHED_SRCS) tests/host/host_test.h \
 	$(HOST_CC) $(HOST_TEST_CFLAGS) -Ihypervisor/arch/x86/include \
 	    -DCONFIG_NR_CPUS=1 -DCONFIG_NR_VMS=2 -o $@ $(HOST_SCHED_SRCS)
 
+# HV-004 T1 behavioral RED, deliberately separate from the existing green suite.
+# Link the actual VM query helpers; discard only unused boot/arch dependencies.
+HOST_PAUSE_CONFIRMATION_SRCS := tests/host/pause_confirmation_test.c \
+    hypervisor/common/sched/sched.c hypervisor/common/sched/sched_q.c \
+    hypervisor/common/vm/vcpu_state.c hypervisor/common/vm/vm.c \
+    hypervisor/common/hypercall/hypercall.c
+
+$(BUILD_DIR)/host/pause_confirmation_test: $(HOST_PAUSE_CONFIRMATION_SRCS) \
+    tests/host/host_test.h hypervisor/include/vm.h hypervisor/include/sched.h \
+    hypervisor/include/hypercall.h hypervisor/include/vcpu_state.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(HOST_TEST_CFLAGS) -Ihypervisor/arch/x86/include \
+	    -DCONFIG_NR_CPUS=2 -DCONFIG_NR_VMS=2 -ffunction-sections -fdata-sections \
+	    -Wl,--gc-sections -o $@ $(HOST_PAUSE_CONFIRMATION_SRCS)
+
+.PHONY: host-test-pause-confirmation
+host-test-pause-confirmation: $(BUILD_DIR)/host/pause_confirmation_test
+	$(BUILD_DIR)/host/pause_confirmation_test
+
 $(BUILD_DIR)/host/vcpu_state_race_test: tests/host/vcpu_state_race_test.c \
     hypervisor/common/vm/vcpu_state.c hypervisor/include/vcpu_state.h
 	@mkdir -p $(dir $@)
