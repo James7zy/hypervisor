@@ -69,6 +69,12 @@ for probe in (0, 1):
             "wrong printed WnR": good.replace("wnr=1", "wnr=0"),
             "CM": good.replace(f"esr={esr:#x}", f"esr={esr | (1 << 8):#x}"),
         })
+    else:
+        regressions.update({
+            "missing XN WnR placeholder": good.replace(" wnr=0", ""),
+            "nonzero XN WnR placeholder": good.replace("wnr=0", "wnr=1"),
+            "quoted XN WnR placeholder": good.replace("wnr=0", "wnr=0'"),
+        })
     for name, bad in regressions.items():
         if check(bad, probe):
             failures.append(f"{kind}: {name}")
