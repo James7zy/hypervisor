@@ -12,6 +12,11 @@
 > 10 s–2 min）是切片关卡②与里程碑验收的固定项，**不进** `make test` 聚合（ADR-0016
 > 的"可复现验证"靠脚本 + 固定哈希落地，大二进制不入库）。原文"no automated suite"
 > 的前提已经过期：自动化门禁存在，只是仍为本地形态、无 CI。
+>
+> **2026-11-09:** 加入 RAM 边界与启动前权限负向门禁后，`make test` 为 4 项非 QEMU
+> 检查 + 15 个 QEMU 目标/18 次启动（s2bounds 三次、s2perm 两次）。host 与 Linux 门仍
+> 独立，gate 语义不变；当前计数见[架构入口](../reference/arm/current-architecture.md)，
+> 权限证据与 checker 约束见 [ADR-0027](0027-abort-classification-and-startup-permissions.md)。
 
 A bare-metal EL2 hypervisor is awkward to unit-test: most of its behaviour is
 only observable on real (or emulated) ARM hardware after a context switch into a
