@@ -360,12 +360,30 @@ $(BUILD_DIR)/host/s2_test: $(HOST_S2_SRCS) tests/host/host_test.h \
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_TEST_CFLAGS) -o $@ $(HOST_S2_SRCS)
 
-host-test: $(BUILD_DIR)/host/host_test $(BUILD_DIR)/host/sched_test $(BUILD_DIR)/host/vcpu_state_race_test $(BUILD_DIR)/host/hypercall_test $(BUILD_DIR)/host/s2_test
+HOST_STAGE2_BUILD_SRCS := tests/host/stage2_build_test.c \
+    hypervisor/arch/arm64/mmu/stage2_build.c hypervisor/common/mmu/s2_table.c \
+    hypervisor/common/vm/vm_configs.c
+HOST_STAGE2_BUILD_FLAGS := -Ihypervisor/arch/x86/include \
+    -Ihypervisor/arch/arm64/board/qemu_virt -Ihypervisor/arch/arm64/mmu \
+    -DCONFIG_NR_CPUS=4 -DCONFIG_NR_VMS=2
+
+$(BUILD_DIR)/host/stage2_build_linux_test $(BUILD_DIR)/host/stage2_build_svm_test: \
+    $(HOST_STAGE2_BUILD_SRCS) hypervisor/arch/arm64/mmu/stage2_build.h \
+    hypervisor/include/vm_config.h hypervisor/include/s2_table.h \
+    hypervisor/arch/arm64/board/qemu_virt/board.h tests/host/host_test.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(HOST_TEST_CFLAGS) $(HOST_STAGE2_BUILD_FLAGS) \
+	    $(if $(findstring _svm_,$@),-DCONFIG_GUEST_SVM=1 -DCONFIG_SVM_XVM2=1) \
+	    -o $@ $(HOST_STAGE2_BUILD_SRCS)
+
+host-test: $(BUILD_DIR)/host/host_test $(BUILD_DIR)/host/sched_test $(BUILD_DIR)/host/vcpu_state_race_test $(BUILD_DIR)/host/hypercall_test $(BUILD_DIR)/host/s2_test $(BUILD_DIR)/host/stage2_build_linux_test $(BUILD_DIR)/host/stage2_build_svm_test
 	$(BUILD_DIR)/host/host_test
 	$(BUILD_DIR)/host/sched_test
 	$(BUILD_DIR)/host/vcpu_state_race_test
 	$(BUILD_DIR)/host/hypercall_test
 	$(BUILD_DIR)/host/s2_test
+	$(BUILD_DIR)/host/stage2_build_linux_test
+	$(BUILD_DIR)/host/stage2_build_svm_test
 
 TEST_BUILD_DIR := build/test-svm
 
