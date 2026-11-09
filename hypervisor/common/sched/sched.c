@@ -132,6 +132,7 @@ static void sched_pause_safe_point(u32 pcpu, struct vcpu *prev)
             sched_pause_exclude(prev);
         VM_PAUSE_TEST_POINT(PAUSE_BEFORE_ACK, m);
         __atomic_store_n(&m->pause_ack[pcpu], s, __ATOMIC_RELEASE);
+        VM_PAUSE_TEST_POINT(PAUSE_AFTER_ACK, m);
     }
 }
 
@@ -173,6 +174,7 @@ void sched_loop(u32 pcpu)
                 sched_yield_cur();
         }
         sched_pause_safe_point(pcpu, prev);
+        VM_PAUSE_TEST_POINT(PAUSE_SAFE_POINT_DONE, NULL);
         if (prev != NULL &&
             __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNING) {
             /* Unwind without a state change (HC_GUEST_DONE park; a timer

@@ -357,11 +357,13 @@ HOST_PAUSE_CONFIRMATION_SRCS := tests/host/pause_confirmation_test.c \
     hypervisor/common/hypercall/hypercall.c
 
 $(BUILD_DIR)/host/pause_confirmation_test: $(HOST_PAUSE_CONFIRMATION_SRCS) \
-    tests/host/host_test.h hypervisor/include/vm.h hypervisor/include/sched.h \
+    tests/host/host_test.h tests/host/pause_interleave.h \
+    hypervisor/include/vm.h hypervisor/include/sched.h \
     hypervisor/include/hypercall.h hypervisor/include/vcpu_state.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_TEST_CFLAGS) -Ihypervisor/arch/x86/include \
 	    -DCONFIG_NR_CPUS=2 -DCONFIG_NR_VMS=2 -ffunction-sections -fdata-sections \
+	    -include tests/host/pause_interleave.h \
 	    -Wl,--gc-sections -o $@ $(HOST_PAUSE_CONFIRMATION_SRCS)
 
 .PHONY: host-test-pause-confirmation
