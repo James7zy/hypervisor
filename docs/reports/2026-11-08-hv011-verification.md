@@ -130,10 +130,10 @@ x86_64-linux-gnu-objcopy -O binary build/test-x86/hypervisor.elf build/test-x86/
 | P8 | 设备 1 GB 一次 map（块形状由 2 MB 块变 1 GB 块） | 自检拒绝 | `EQUIV FAIL L1[0]=0x400000000006c5 is not a table` | ✔ |
 | P9 | `vmexit.c` 的 `park_current_vcpu` 换回 `cpu_arch_halt()` | `s2fault` 红 | exit 2：`FAIL: 'SVM: hello from VM1' not found` + `FAIL: 'SVM HVC: done (x1=0x10001)' not found` | ✔ |
 | P10 | `s2_pool_free` 删位图清理 | host 红 | 4 条 `FAIL tests/host/s2_test.c:88/89/95/161`（`s2 table FAIL (75 assertions)`，exit 2） | ✔ |
-| P11 | 按 spec G3 交换 `MAIR_EL2` 两槽（`el2_mmu.h`） | 见 §4 | **QEMU 上仍能正常启动**（QEMU 不建模 cacheability/内存属性）→ 该偏离在 QEMU 不可见，详见 §4 | ✔ |
+| P11 | 按 spec G3 交换 `MAIR_EL2` 两槽（`el2_mmu.h`） | 见 §4 | **所跑 QEMU 场景仍正常启动**；仅说明这些场景未检出 MAIR 交换，不推断 QEMU 的全部属性建模能力 | ✔ |
 
-P11 的结论不是"实验失败"，而是复验发现的一个重要事实：G3 的方向性错误**不能被 QEMU gate 抓住**，
-只能靠规范阅读与评审裁定。因此研发的偏离必须写进 spec/ADR，而不是靠场景兜底。
+P11 只说明 G3 的槽位交换未被本轮所跑场景检出；规范与描述符定义支持修订 spec/ADR。
+不能排除其他 QEMU 场景能检出属性错误，更不能据此免除 RO/XN 负向测试。
 
 ## 4. 对抗性审查（逐项结论）
 
@@ -189,13 +189,13 @@ P11 的结论不是"实验失败"，而是复验发现的一个重要事实：G3
 
 ### 4.4 TLB（`stage2_flush_vm`）
 
-- 全仓 grep：`stage2_flush_vm()` 唯一调用者是 `stage2_init()` 末尾，而此刻任何 vCPU 都还没装载 VTTBR_EL2
-  （`stage2_activate` 之后才写寄存器），所以那次 `tlbi vmalls12e1is` 事实上是空操作。
-- `s2_map/unmap/protect` 的唯一调用者也是 `stage2_init()`（`s2_pool_alloc` 只在池内部），`*flush` 出参在
-  唯一调用点被收集但**从未被检查**。
-- 判定：**契约闲置，不是遗漏**。当前没有动态映射消费者，因此不存在"guest 读到旧描述符"的窗口；风险窗口在
-  第一个动态 map 消费者落地时开启（DM 分内存 / MMIO 直通）。届时正确形状是 `if (flush) stage2_flush_vm();`，
-  建议在 ADR-0025 里把这条写成硬约束（API 无法强制调用者刷 TLB）。
+- `stage2_flush_vm()` 的启动期调用早于目标 VTTBR 安装；`VMALLS12E1IS` 针对当前 VMID，
+  不能据此称为空操作，也不能称为已失效目标或所有 VMID。
+- 运行代码目前只在 `stage2_init()` 使用 `s2_map()`；`s2_unmap/protect()` 只有 host 测试调用。
+  `*flush` 在初始化中被收集但未检查。
+- 当前首次建表、未复用 VMID 的场景不能验证运行期失效。仅加 `if (flush)` 不足以保证正确：
+  动态映射前需落实目标 VTTBR/VMID 上下文、并发与屏障协议，并测试旧翻译确实被淘汰。
+  后续已将代码中“Every VMID”注释更正为当前 VMID；没有改变失效实现。
 
 ### 4.5 承重（见 §3）
 
@@ -233,8 +233,8 @@ P11 的结论不是"实验失败"，而是复验发现的一个重要事实：G3
    已分配的表页**留在池里**（实测 pool=2、map 4 MB 的 4 KB 页 → 第一个 2 MB 窗口 512 页装好后返回 `ENOMEM`，
    池空闲数为 0）。当前唯一调用者是 `stage2_init()`（失败即整 VM 不下发），所以无现网影响；但动态消费者必须
    自己 unmap 已装部分，否则从池里永久漏掉表页。建议写进 spec §6 已知限制（目前只写了"拆块保守拒绝"），本报告 §7 已登记。
-5. **`*flush` 契约未接上消费点。** 见 §4.4：`stage2_init` 收了 `flush` 却不看，靠末尾无条件刷一次兜底。
-   现在无害；第一个动态调用者落地前应把"看 `flush` 再刷"写死。
+5. **`*flush` 契约未接上运行期消费点。** 见 §4.4：启动期末尾的无条件调用不证明目标 VMID
+   动态失效正确；动态消费者落地前必须补目标上下文、同步协议与失效测试。
 6. **`s2_protect` 的 `p` 参数未用（`(void)p`）。** 为签名对称保留，可接受，仅记一笔。
 7. **`common/mmu/s2_table.c` 承载 ARM Stage-2 编码。** arch-boundary gate 通过（无 `stage2` 标识符、无 arch 头），
    且 spec G2/Task 1 就是"generic 目录、arch-neutral、纯内存操作"。仅提示：x86 SVM 将来需要同形状的池 + 不同
@@ -283,9 +283,9 @@ P11 的结论不是"实验失败"，而是复验发现的一个重要事实：G3
    index 1 = Normal WB，**改槽序会静默改变 EL2 自己身份映射的属性**"。按 spec G3 的槽序（Normal=0、Device=1）
    写 `MAIR_EL2`，会把这两块描述符的语义整体互换。
 4. **实测补充（重要）**：我把 `el2_mmu.h` 的 `MAIR_EL2_VALUE` 按 spec G3 的槽序交换后重建实跑 ——
-   **QEMU 上一切照常**（连 Linux/SVM 场景都不会红），因为 QEMU 不建模内存类型/cacheability。也就是说，
-   这个错误**不会被任何 QEMU gate 抓住**；在 RK3588 真机上它会变成"GIC/PL011 被当 Normal-WB 缓存访问"或
-   "hypervisor 代码段被当 Device 访问"这类难查的现场故障。因此这条偏离必须落到 spec/ADR 文本，靠评审而不是靠门禁。
+   **所跑 QEMU 场景仍通过**。更正：这只能证明本次场景未检出该交换，不能断言任何 QEMU gate
+   都检不出内存属性错误，也不能外推到 S2AP/XN。槽序交换改变 EL2 Stage-1 类型的风险仍成立；
+   实际 cacheability 与设备访问行为待真机验证，RO/XN 则应增加 guest 负向访问测试。
 5. **建议的 spec 修改**：G3 改为"Stage-2 属性由描述符内联的 `MemAttr`/`SH` 编码（Normal WB/WB-RA/Inner-Shareable
    与 Device-nGnRE/Outer-Shareable 两组）；`MAIR_EL2` 不参与 Stage-2，其槽序只属于 EL2 自己的 Stage-1
    （沿用 `el2_mmu.h` 的 slot0=Device / slot1=Normal）；`stage2_init` 里的 `msr mair_el2` 只是把同一常量再写一次、
@@ -295,7 +295,7 @@ P11 的结论不是"实验失败"，而是复验发现的一个重要事实：G3
 
 | 研发说法 | 复验结论 |
 |---|---|
-| G3 的 MAIR 槽序与 spec 冲突，以代码为准 | **一致**，且 §9 给出独立依据；QEMU 无法证伪该风险（新增事实） |
+| G3 的 MAIR 槽序与 spec 冲突，以代码为准 | **一致**，且 §9 给出描述符依据；本轮所跑 QEMU 场景未检出 MAIR 交换 |
 | `vm_arch_init()` 改 `int`、失败置 VM OFF、不停 pCPU | **一致**；P2/P3 双向验证 |
 | `s2_map` 无回滚 | **一致**，并细化为"部分映射留存 + 表页泄漏"（§6-4 有实测） |
 | `s2_protect` 保留未用 pool 参数 | **一致**，无害 |

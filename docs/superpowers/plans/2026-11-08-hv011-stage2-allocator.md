@@ -23,7 +23,7 @@
 | 1 | 重构后映射悄悄变了（RAM 少一块、GIC 洞没了） | G6 启动自检 + 既有 12 场景（含 `xvm`/`xvm2`/Linux 门禁） |
 | 2 | 一个 guest fault 让 pCPU 停下，另一个 VM 一起死 | `s2fault` 场景：VM0 vCPU0 fault 后 VM1 仍打印标记；host 无法覆盖，靠场景 |
 | 3 | 表页泄漏/池耗尽后静默继续 | host：分配-释放-再分配循环、耗尽返回 `-ENOMEM` |
-| 4 | 改完描述符没刷 TLB（guest 读到旧映射） | host 断言"需要失效"的返回值；arch 侧 `tlbi` 调用点由代码评审 + `s2fault` 场景（新映射可见） |
+| 4 | 改完描述符没刷 TLB（guest 读到旧映射） | host 只断言变更标志；`s2fault` 只测初始未映射访问，不验证运行期 TLBI。动态重映射、目标 VMID 与失效测试仍缺失 |
 
 ## Task 1: host 可测的表池与映射 API（RED → GREEN）
 
@@ -31,7 +31,7 @@
   池分配/释放/耗尽、`s2_map` 建 L2/L3、块与页混用、`s2_unmap` 回收、`s2_protect` 只改属性、
   属性/XN 编码、返回值"需要失效"。
 - GREEN：新增 `hypervisor/common/mmu/s2_table.c` + `include/s2_table.h`（**generic 目录**，
-  arch-neutral，纯内存操作），提供：
+  纯内存操作、可 host 测试，但描述符编码仍是 ARM64 专用），提供：
   ```c
   struct s2_pool { u64 *pages; u32 npages; u64 *bitmap; };  /* 4 KB 表页 */
   int  s2_pool_init(struct s2_pool *, void *mem, u32 npages);
@@ -48,8 +48,10 @@
 - `arch/arm64/mmu/stage2.c` 重写为：静态池（`S2_POOL_PAGES`）+ `s2_map` 建初始映射
   （设备 2 MB 块、RAM 1 GB 块、GIC/UART 不打洞而是不映射）→ 启动自检比对旧值 →
   `stage2_activate` 不变。
-- 新增 `stage2_flush_vm()`（`tlbi vmalls12e1is` + `dsb ish`），在任何 map/protect 后调用。
-- `MAIR_EL2` 显式写两个槽位（Normal WB / Device nGnRE），不再依赖复位值。
+- 新增 `stage2_flush_vm()`（`tlbi vmalls12e1is` + `dsb ish`）。实际仅启动期调用，
+  指令针对当前 VMID；动态映射前需补目标上下文与失效验证，不是“所有 VMID 全刷”。
+- Stage-2 内联编码 `MemAttr`，不读 `MAIR_EL2`；后者沿用 EL2 Stage-1 既有槽序
+  （slot0=Device-nGnRE、slot1=Normal WB），不可按原稿反转。
 - 验证：`make test` 12 场景仍绿（等价性证明）。
 
 ## Task 3: fault 闭环 + 场景

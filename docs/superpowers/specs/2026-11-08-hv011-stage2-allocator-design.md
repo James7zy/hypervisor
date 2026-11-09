@@ -14,8 +14,8 @@
 
 1. **静态表是硬编码的**：加一个设备、改一段内存属性、做只读页，都得改 `stage2.c` 的常量；
    DM 将来要按 VM 动态建内存，没有入口。
-2. **权限与属性无法表达**：`S2_S2AP_RW` 写死，`XN` 只用在设备上；HV-012 要的写保护、
-   HV-013 要的 MAIR 属性选择没有代码承载。
+2. **权限与属性缺少可复用接口**：`S2_S2AP_RW` 写死，`XN` 只用在设备上；HV-012 要求写保护，
+   HV-013 要求 Normal/Device、cacheability 与直通 MMIO 的真实属性语义，而非单纯 MAIR 槽位选择。
 3. **fault 没有闭环**：未映射 IPA / 权限错误一律落到 `cpu_arch_halt()`，把 pCPU 一起钉死
    ——这是"一个坏 guest 拖垮同核好 guest"，正是 H1 阶段必须消掉的失败模式。
 
@@ -37,7 +37,7 @@ TLB 维护（VM 级失效）；fault 闭环（park 故障 vCPU，**不停 pCPU**
 |---|---|---|
 | G1 | 分配粒度 | 4 KB 表页，静态池 `S2_POOL_PAGES`（默认 64，够 2 VM ×（L1+若干 L2/L3））。位图管理，**host 可测**（纯逻辑，无 MMIO）。池用尽 → `-ENOMEM`，调用者（`stage2_init`）打印并让该 VM 建表失败（不 halt pCPU）。 |
 | G2 | API 形状 | `s2_map(s2, ipa, pa, len, attr)`、`s2_unmap(s2, ipa, len)`、`s2_protect(s2, ipa, len, attr)`（attribut 含 RW/RO、XN、Device/Normal）。**纯逻辑对内**：只改内存里的描述符，返回是否需要 TLB 失效；**arch 侧**再执行 `dsb`+`tlbi`。这样描述符编码可 host 测试。 |
-| G3 | 属性编码 | **修订（2026-11-08，实测+测试专家独立核实）**：Stage-2 块/页描述符自带 `MemAttr[3:0]`（ARM DDI0487 D8.2.6），**stage-2 行走不读 `MAIR_EL2`**——原稿写"显式写 MAIR_EL2 两个槽位"是错的。实现改为：`S2_ATTR_NORMAL_WB`/`S2_ATTR_DEVICE_nGnRE` 只是**属性选择器**，直接编码进描述符；`MAIR_EL2` 保持 `el2_mmu.c` 既有布局（slot0=Device、slot1=Normal），因为它是 **EL2 自己 stage-1** 的 attr 索引，改槽序会静默重定 EL2 身份映射的类型。XN 作为独立 flag（Device 恒 XN）。⚠️ QEMU 不建模内存属性，这个错误在所有 gate 上**都看不出来**，只能靠描述符单测 + 真机。 |
+| G3 | 属性编码 | **修订（2026-11-08，实测+测试专家独立核实）**：Stage-2 块/页描述符自带 `MemAttr[3:0]`（ARM DDI0487 D8.2.6），**stage-2 行走不读 `MAIR_EL2`**——原稿写"显式写 MAIR_EL2 两个槽位"是错的。实现改为：`S2_ATTR_NORMAL_WB`/`S2_ATTR_DEVICE_nGnRE` 只是**属性选择器**，直接编码进描述符；`MAIR_EL2` 保持 `el2_mmu.c` 既有布局（slot0=Device、slot1=Normal），因为它是 **EL2 自己 stage-1** 的 attr 索引，改槽序会静默重定 EL2 身份映射的类型。XN 作为独立 flag（Device 恒 XN）。交换 MAIR 槽位未被所跑 QEMU 场景检出；不能据此断言所有属性错误都不可测。RO/XN 仍需 guest 负向访问测试，真实缓存与设备访问语义待真机验证。 |
 | G4 | 权限 | `S2_PROT_RO` = S2AP 只读（0b11 的读位），`S2_PROT_RW` = 读写。**写保护靠 S2AP**，不是靠去掉 AF/WRITE 位；权限 fault 的 DFSC 走 G5。 |
 | G5 | fault 闭环 | `data_abort.c` 先查 MMIO 处理器（现有行为不变）；**没有处理器时**：打印 `[hv] s2 fault: vCPU<x> ipa=… fsc=… ec=…`，把**该 vCPU 置 OFF**（复用 `VCPU_EV_OFF`，与 CPU_OFF 同一条状态机路径）并 `hv_restore()`。pCPU 继续调度其他 vCPU。**禁止 `cpu_arch_halt()`**。 |
 | G6 | 等价的启动自检 | 新 API 重建后，`stage2_init` 末尾比对"旧静态期望值"（RAM 1 GB 块、设备 2 MB 块、GIC/UART 无效），不一致 → 打印 + 建表失败。这把"重构没改变语义"变成可执行的断言，而不是评审口头的。 |
@@ -88,9 +88,10 @@ graph TD
 - **`s2_map` 不回收半途失败**：多块区间中途 `S2_ENOMEM` 时，已装的叶子保持映射、已分配的表页
   留在池里，**没有回滚**。当前唯一调用者是 `stage2_init()`（失败即整 VM 不下发），所以无现网
   影响；动态消费者必须自己 unmap 已装部分，否则永久漏页。触发 = 第一个动态映射消费者（M13）。
-- **`*flush` 还没有运行期消费点**：`stage2_init` 收了 `flush` 却靠末尾无条件刷一次兜底；
-  `stage2_flush_vm()` 目前无调用者。触发 = 第一个动态映射（届时必须"看 flush 再刷"）。
-- **QEMU 不建模内存属性**：属性/共享性/XN 的错误在所有 QEMU gate 上都不可见，只有描述符
-  host 单测与 RK3588 真机能发现。任何属性语义的改动必须在真机阶段复验。
+- **`*flush` 还没有运行期消费点**：`stage2_init()` 调用 `stage2_flush_vm()`，但此时尚未
+  安装目标 VTTBR；`VMALLS12E1IS` 只针对当前 VMID，不是所有 VMID。动态映射及 VMID
+  复用前必须补目标上下文、同步协议与失效测试，不能把首次启动通过当作动态失效已验证。
+- **属性验证缺口**：交换 MAIR 槽位后所跑场景仍通过，只证明这些场景没检出该错误。
+  RO/XN 可设计 guest 负向访问测试；实际 cacheability、共享性与设备访问语义仍待真机复验。
 - 权限/只读的硬件行为只有 host 层的描述符断言 + 代码评审；SVM 场景只验证"未映射 fault
   不拖死 pCPU"（触发真实写保护验证 = 出现第一个 RO 页消费者）。

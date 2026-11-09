@@ -191,10 +191,10 @@ void stage2_activate(const struct vcpu *vcpu)
 void stage2_flush_vm(void)
 {
     /*
-     * Every VMID, every stage-2 entry: VM-level invalidation after any
-     * map/unmap/protect (HV-011 G7). Conservative on purpose — range
-     * invalidation waits for measured map/switch cost (RK3588 passthrough).
-     * The leading dsb publishes the table writes before the tlbi reads them.
+     * Invalidate stage-1/stage-2 translations for the current VMID, not all
+     * VMIDs. Runtime callers must establish the target VTTBR context and
+     * synchronization; the startup call does not validate that protocol.
+     * The leading dsb publishes table writes before invalidation.
      */
     asm volatile(
         "dsb ish\n"

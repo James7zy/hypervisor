@@ -56,17 +56,19 @@ sequenceDiagram
 - **fault 时 halt pCPU**（现状）——否决：一个坏 guest 拖垮同核好 guest，与"多 VM 隔离"的目标冲突。
 - **fault 时报给用户态 DM**——延后：`io_req` 环未落地（M13）。
 - **改 `MAIR_EL2` 槽序来"统一"属性**——否决：stage-2 不读 MAIR，而 EL2 stage-1 在读；
-  乱改会让 EL2 自己的 GIC/UART 映射变可缓存、镜像变 Device。测试专家实测：**QEMU 不建模
-  属性，改错也能启动**——所以这条只能靠描述符单测与真机，不能靠 gate。
+  乱改会让 EL2 自己的 GIC/UART 映射变可缓存、镜像变 Device。测试专家交换槽位后，
+  所跑 QEMU 场景仍通过；这只说明这些场景未检出该错误，不证明 QEMU 完全不建模属性。
 
 ## Consequences
 
-- **属性正确性没有 gate**：QEMU 不建模内存属性，`MemAttr/SH/XN` 的错误只能靠
-  `tests/host/s2_test.c` 的描述符断言 + RK3588 真机。任何属性语义改动必须标"待真机复验"。
+- **属性验证缺口**：已有 host 描述符断言，但缺少 RO/XN 的 guest 负向访问门禁；
+  不能由 MAIR 交换实验推导 XN 或权限无法在 QEMU 验证。真实 cacheability、共享性与
+  设备访问行为仍待真机复验。
 - **`s2_map` 无回滚**：中途 `ENOMEM` 会留下已装映射与已分配表页；当前唯一调用者失败即弃 VM，
   动态消费者（M13）必须自己 unmap。
-- **`*flush`/`stage2_flush_vm()` 暂无运行期消费点**：启动期末尾无条件刷一次兜底；第一个
-  动态映射落地时必须改成"看 `flush` 再刷"，否则 guest 可能读到旧描述符。
+- **`*flush` 暂无运行期消费点**：`stage2_init()` 确实调用 `stage2_flush_vm()`，但
+  `VMALLS12E1IS` 针对当前 VMID，不是所有 VMID。建表时尚未安装目标 VTTBR；首次启动
+  未复用 VMID 不能验证动态失效正确性。动态映射前须落实目标上下文、同步与失效测试。
 - **保守全刷 TLB**：每次映射变更都 VM 级失效；升级条件 = 实测开销成为瓶颈（RK3588 直通）。
 - **没有巨页拆分**：遇到"块中间改一页"的请求一律 `S2_EINVAL`；触发 = 第一个部分改写的
   消费者（MMIO 直通/按需调页）。
