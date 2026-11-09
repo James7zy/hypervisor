@@ -18,6 +18,7 @@
 #define EC_HVC64     0x16U   /* HVC instruction execution, AArch64 */
 #define EC_SMC64     0x17U   /* SMC instruction execution, AArch64 (TSC) */
 #define EC_SYS64     0x18U   /* Trapped MSR/MRS */
+#define EC_IABT_LOW  0x20U   /* Instruction Abort from a lower EL */
 #define EC_DABT_LOW  0x24U   /* Data Abort from a lower EL */
 
 static void handle_hvc(struct arch_regs *regs)
@@ -364,6 +365,7 @@ void handle_exit(struct arch_regs *regs, u64 esr)
     case EC_SYS64:    /* see handle_sysreg_trap */
         handle_sysreg_trap(regs, esr);
         return;
+    case EC_IABT_LOW:
     case EC_DABT_LOW: { /* → MMIO trap-and-emulate */
         struct abort_snapshot fault;
         abort_snapshot_read(&fault, esr, regs->elr_el2);

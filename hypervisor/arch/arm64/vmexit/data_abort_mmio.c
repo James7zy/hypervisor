@@ -1,5 +1,4 @@
 /* SPDX-License-Identifier: TBD */
-#include <printk.h>
 #include <mmio.h>
 #include "data_abort.h"
 
@@ -8,7 +7,6 @@
 #define ISS_SAS(iss)  (((iss) >> 22) & 0x3U)   /* Access size 00..11 -> 1/2/4/8 */
 #define ISS_SRT(iss)  (((iss) >> 16) & 0x1FU)  /* Transfer register 0..31 */
 #define ISS_WNR(iss)  (((iss) >> 6)  & 0x1U)   /* Write not Read */
-#define ISS_DFSC(iss) ((iss) & 0x3FU)          /* Data Fault Status Code */
 
 /* SAS (00,01,10,11) -> access size in bytes (1,2,4,8). */
 static u8 mmio_sas_to_bytes(u32 sas)
@@ -16,25 +14,55 @@ static u8 mmio_sas_to_bytes(u32 sas)
     return (u8)(1U << sas);
 }
 
+struct abort_info abort_classify(const struct abort_snapshot *fault)
+{
+    u32 iss = (u32)fault->esr;
+    struct abort_info info = {
+        .ec = (u32)(fault->esr >> 26) & 0x3fU,
+        .fsc = iss & 0x3fU,
+        .class_name = "unknown",
+    };
+    bool translation = info.fsc >= 0x05 && info.fsc <= 0x07;
+    bool access_flag = info.fsc >= 0x09 && info.fsc <= 0x0b;
+    bool permission = info.fsc >= 0x0d && info.fsc <= 0x0f;
+    bool s1ptw = (iss & (1U << 7)) != 0;
+    bool cm = (iss & (1U << 8)) != 0;
+
+    if (info.ec != 0x24 && info.ec != 0x20)
+        return info;
+    if (translation)
+        info.class_name = "translation";
+    else if (access_flag)
+        info.class_name = "access-flag";
+    else if (permission)
+        info.class_name = "permission";
+    /* FnV is defined for synchronous external abort (not a universal flag). */
+    info.far_valid = translation || access_flag || permission ||
+                     (info.fsc == 0x10 && !(iss & (1U << 10)));
+    info.wnr_valid = info.ec == 0x24 && (translation || access_flag || permission);
+    if ((translation || access_flag) && !s1ptw) {
+        /* Non-LPA2 FIPA: HPFAR[39:4] -> IPA[47:12], then profile bounds. */
+        info.ipa = ((fault->hpfar & 0xfffffffff0ULL) << 8) |
+                   (fault->far & 0xfffULL);
+        info.ipa_valid = (fault->hpfar >> 40) == 0 && info.ipa < (1ULL << 39);
+    }
+    info.mmio_allowed = info.ec == 0x24 && translation && ISS_ISV(iss) &&
+                        !s1ptw && !cm && info.ipa_valid;
+    return info;
+}
+
 int mmio_handle_data_abort(struct arch_regs *regs, const struct abort_snapshot *fault)
 {
-    u64 esr = fault->esr;
-    u32 iss = (u32)(esr & 0x01FFFFFFU);
+    u32 iss = (u32)fault->esr;
+    struct abort_info info = abort_classify(fault);
 
-    if (ISS_ISV(iss) == 0U) {
-        /* No instruction syndrome: would require fetching+decoding the guest
-         * instruction. Linux GIC/virtio accesses are simple loads/stores with
-         * ISV=1, so we report this as unsupported for M3.x. */
-        printk("[hv] MMIO: ISV=0 unsupported, ESR=0x%lx ELR=0x%lx\n",
-               esr, regs->elr_el2);
+    if (!info.mmio_allowed)
         return -1;
-    }
 
     u32 srt = ISS_SRT(iss);
 
     struct mmio_access acc;
-    acc.addr     = ((fault->hpfar & 0xFFFFFFFFFFF0ULL) << 8) |
-                   (fault->far & 0xFFFULL);
+    acc.addr     = info.ipa;
     acc.offset   = 0;   /* filled in by mmio_bus_dispatch */
     acc.size     = mmio_sas_to_bytes(ISS_SAS(iss));
     acc.is_write = (ISS_WNR(iss) != 0U);
