@@ -16,21 +16,37 @@ def check(text, probe):
     }
     if probe == 0:
         expected["wnr"] = "1"
-    faults = list(re.finditer(r"\[hv\] s2 fault: vCPU(\d+) ([^\r\n]*)", text))
+    faults = list(re.finditer(r"^\[hv\] s2 fault: vCPU(\d+) ([^\r\n]*)\r?$", text, re.M))
     if len(faults) != 1 or faults[0].group(1) != "0":
         return False
     fault = faults[0]
-    fields = dict(re.findall(r"(\w+)=([^\s]+)", fault.group(2)))
+    fields = {}
+    for token in fault.group(2).split():
+        key, separator, value = token.partition("=")
+        if not separator or key in fields:
+            return False
+        fields[key] = value
     if any(fields.get(k) != v for k, v in expected.items()):
         return False
+    try:
+        esr = int(fields.get("esr", ""), 0)
+    except ValueError:
+        return False
+    if (not 0 <= esr < (1 << 32) or (esr >> 26) != int(fields["ec"], 16) or
+            (esr & 0x3f) != int(fields["fsc"], 16)):
+        return False
+    # 两个探针都是直接访存；RO 的 WnR 必须与原始 ISS 一致，不能是 CM。
+    if esr & (1 << 7) or (probe == 0 and
+                         (esr & (1 << 8) or ((esr >> 6) & 1) != int(fields["wnr"]))):
+        return False
     marker = "SVM: s2perm " + ("RO" if probe == 0 else "XN") + " read ok"
-    if marker not in text[:fault.start()]:
+    if not re.search("^" + re.escape(marker) + r"\r?$", text[:fault.start()], re.M):
         return False
     if any(marker in text for marker in ("STORE SURVIVED", "XN ENTERED", "XN RETURNED")):
         return False
     before = 0
     progressed = False
-    for match in re.finditer(r"SVM: s2perm survivor vm=1 vcpu=0 pcpu=0 progress=([0-9a-f]{8})\b", text):
+    for match in re.finditer(r"^SVM: s2perm survivor vm=1 vcpu=0 pcpu=0 progress=([0-9a-f]{8})\r?$", text, re.M):
         value = int(match.group(1), 16)
         if match.start() < fault.start():
             before = max(before, value)
