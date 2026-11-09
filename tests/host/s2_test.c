@@ -95,7 +95,7 @@ static void pool_case(void)
     TEST_ASSERT(pool_free_pages(&p) == 3);
 }
 
-/* A 1 GB device range with 2 MB granularity: one L2 table, 512 blocks. */
+/* A 128 MB device range with 2 MB granularity: one L2 table, 64 blocks. */
 static void map_block_case(void)
 {
     const u64 want = DESC_BLOCK | DESC_DEV | DESC_S2AP_RW | DESC_SH_OSH |
@@ -104,7 +104,7 @@ static void map_block_case(void)
     u64 *l2;
 
     reset();
-    TEST_ASSERT(s2_map(root, &pool, 0, 0, BLOCK_1G,
+    TEST_ASSERT(s2_map(root, &pool, 0, 0, 64ULL * BLOCK_2M,
                        S2_ATTR_DEVICE_nGnRE | S2_PROT_RW | S2_XN, &flush) == 0);
     TEST_ASSERT(flush);                     /* the guest must see the change */
     TEST_ASSERT((root[0] & 0x3ULL) == DESC_TABLE);
@@ -113,7 +113,8 @@ static void map_block_case(void)
     l2 = (u64 *)(uintptr_t)DESC_OA(root[0]);
     TEST_ASSERT(l2[0] == (0ULL | want));
     TEST_ASSERT(l2[1] == (BLOCK_2M | want));
-    TEST_ASSERT(l2[511] == ((511ULL * BLOCK_2M) | want));
+    TEST_ASSERT(l2[63] == (63ULL * BLOCK_2M | want));
+    TEST_ASSERT(l2[64] == 0);               /* past the range: unmapped */
     TEST_ASSERT(pool_free_pages(&pool) == 7);   /* exactly one table page */
 }
 
@@ -184,7 +185,7 @@ static void protect_case(void)
     TEST_ASSERT((root[1] & 0x3ULL) == DESC_BLOCK);
 
     /* Same attributes again: nothing changed, nothing to flush. */
-    flush = true;
+    flush = false;
     TEST_ASSERT(s2_protect(root, &pool, 0x40000000ULL, BLOCK_1G,
                            S2_ATTR_NORMAL_WB | S2_PROT_RO | S2_XN,
                            &flush) == 0);

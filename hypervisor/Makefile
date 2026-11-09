@@ -11,6 +11,7 @@ hv-objs := \
     common/sched/sched.o \
     common/percpu.o \
     common/io/mmio.o \
+    common/mmu/s2_table.o \
     dm/vuart.o \
     dm/console.o \
     dm/hv_shell.o
