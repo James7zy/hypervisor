@@ -32,6 +32,8 @@ SECTIONS
     . = ALIGN(16);
     . += 0x4000;        /* 16 KiB boot stack */
     __stack_top = .;
+    /* Keep in sync with BOARD_SVM_MEM_BASE: includes BSS and boot stack. */
+    ASSERT(__stack_top <= 0x40200000, "HV overlaps SVM RAM backing")
 
     /DISCARD/ : {
         *(.note.*)
