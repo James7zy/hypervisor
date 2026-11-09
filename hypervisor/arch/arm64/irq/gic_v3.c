@@ -132,8 +132,7 @@ void gic_deactivate(u32 intid)
 void gic_kick_pcpu(u32 cpu)
 {
     u64 sgi = ((u64)BOARD_KICK_SGI << SGI1R_INTID_SHIFT) | (1ULL << cpu);
-    asm volatile("msr ICC_SGI1R_EL1, %0" :: "r"(sgi));
-    asm volatile("isb");
+    asm volatile("msr ICC_SGI1R_EL1, %0; isb" :: "r"(sgi) : "memory");
 }
 
 void gic_ppi_set_enable(u32 cpu, u32 intid, bool enable)

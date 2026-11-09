@@ -21,18 +21,18 @@ void cpu_arch_halt(void) __attribute__((noreturn));
  * arch-specific firmware status. */
 s64 cpu_arch_power_on(u32 pcpu);
 
-/* One wfi, then return — the caller owns the interrupt window (M11 B2):
- * the scheduler loop unmasks (cpu_arch_irq_enable), re-checks its queue,
- * sleeps here, and remasks. Portability: RISC-V wfi; x86 hlt (IF already
- * enabled by the caller's window). */
+/* One idle wait with local IRQ masked, after the scheduler's final check.
+ * ARM uses DSB/WFI: an enabled, correctly routed IRQ must wake despite the PE
+ * mask. This is NOT a masked-HLT contract; x86 remains a link-only stub. */
 void cpu_arch_idle(void);
-/* EL2 IRQ window controls (M11 B2): the idle path's unmask/mask pair.
- * Callers must hold NO locks across the enabled window. */
+/* Open and synchronize pending IRQ recognition, then close the idle window.
+ * Callers must hold NO locks and retain idle_window until IRQ is masked again. */
 void cpu_arch_irq_enable(void);
 void cpu_arch_irq_disable(void);
 
 /* Ask pCPU `pcpu` to re-check its runnable work (asynchronous; the target
- * observes it as an interrupt and re-runs its pick loop). Portability:
+ * observes it as an interrupt and re-runs its pick loop). Request stores must
+ * be visible before the notification (ARM: DSB ISH before SGI). Portability:
  * x86 = IPI, RISC-V = software-interrupt IPI. */
 void cpu_arch_kick(u32 pcpu);
 

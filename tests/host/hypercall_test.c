@@ -76,7 +76,7 @@ static void test_version(void)
 
     /* Any VM, no arguments used. */
     TEST_ASSERT(hypercall_dispatch(&vm[1], HC_VERSION, 0, 0, &ret) == HC_OK);
-    TEST_ASSERT(ret == 0x00000001ULL);   /* major<<16 | minor = 0.1 */
+    TEST_ASSERT(ret == 0x00000002ULL);   /* major<<16 | minor = 0.2 */
 }
 
 static void test_vm_query(void)
@@ -150,7 +150,7 @@ static void test_vm_pause_resume(void)
     TEST_ASSERT(hypercall_dispatch(service, HC_VM_PAUSE, 1, 0, &ret) == HC_OK);
     TEST_ASSERT(vm_is_paused(guest));
     TEST_ASSERT(hypercall_dispatch(service, HC_VM_QUERY, 1, 0, &ret) == HC_OK);
-    TEST_ASSERT(((ret >> 32) & 1ULL) == 1);       /* bit32 = paused (F5) */
+    TEST_ASSERT((ret & HC_VM_QUERY_PAUSED) != 0);       /* bit32 = paused (F5) */
     TEST_ASSERT((ret & 0xFFFFULL) == 1);          /* lower fields untouched */
     TEST_ASSERT(((ret >> 17) & 0x7FFFULL) == 2);
     TEST_ASSERT(hypercall_dispatch(service, HC_VM_PAUSE, 1, 0, &ret) == HC_EBUSY);
@@ -159,7 +159,7 @@ static void test_vm_pause_resume(void)
     TEST_ASSERT(hypercall_dispatch(service, HC_VM_RESUME, 1, 0, &ret) == HC_OK);
     TEST_ASSERT(!vm_is_paused(guest));
     TEST_ASSERT(hypercall_dispatch(service, HC_VM_QUERY, 1, 0, &ret) == HC_OK);
-    TEST_ASSERT(((ret >> 32) & 1ULL) == 0);
+    TEST_ASSERT((ret & HC_VM_QUERY_PAUSED) == 0);
     TEST_ASSERT(hypercall_dispatch(service, HC_VM_RESUME, 1, 0, &ret) == HC_EBUSY);
 }
 

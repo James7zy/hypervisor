@@ -18,7 +18,9 @@ void vm_init(void)
 
         m->id     = vmi;
         m->config = &vm_configs[vmi];
-        m->paused = false;
+        m->pause_state = 0;
+        for (u32 p = 0; p < NR_CPUS; p++)
+            m->pause_ack[p] = 0;
 
         const struct vm_config *cfg = m->config;
 
@@ -170,4 +172,27 @@ void vm_run(void)
 
     /* The scheduler loop (M11 B2 hoist) — see common/sched/sched.c. */
     sched_loop(0);
+}
+
+bool vm_has_pcpu(const struct vm *v, u32 pcpu)
+{
+    for (u32 i = 0; i < VCPUS_PER_VM; i++)
+        if (v->config->vcpu_pcpu[i] == pcpu)
+            return true;
+    return false;
+}
+
+void vm_pause_query(const struct vm *v, bool *paused, bool *quiesced)
+{
+    u64 first = __atomic_load_n(&v->pause_state, __ATOMIC_ACQUIRE);
+    bool complete = true;
+
+    for (u32 p = 0; p < NR_CPUS; p++)
+        if (vm_has_pcpu(v, p) &&
+            __atomic_load_n(&v->pause_ack[p], __ATOMIC_ACQUIRE) != first)
+            complete = false;
+    VM_PAUSE_TEST_POINT(QUERY_AFTER_ACKS, v);
+    u64 last = __atomic_load_n(&v->pause_state, __ATOMIC_ACQUIRE);
+    *paused = (last & 1ULL) != 0;
+    *quiesced = *paused && first == last && complete;
 }

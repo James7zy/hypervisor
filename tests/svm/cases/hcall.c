@@ -8,7 +8,7 @@
  * answer set of HC_VM_QUERY -- a plain guest may query exactly one vmid (its
  * own), the Service VM may query every existing one.
  *
- * Asserted per VM: HC_VERSION answers 0.1; the self query reports
+ * Asserted per VM: HC_VERSION answers 0.2; the self query reports
  * vmid/service/online as that VM's own; querying the other VM succeeds for
  * the Service VM and is refused with HC_EPERM for the guest; an unused id in
  * the vendor range answers HC_ENOSYS. HV-004 adds the pause/resume pair: the
@@ -23,18 +23,9 @@
  */
 #include "../svm_lib.h"
 
-/* include/hypercall.h: SMCCC vendor range, base + (module << 8) + index. */
-#define HC_VERSION   0x87000000UL
-#define HC_VM_QUERY  0x87000100UL
-#define HC_VM_PAUSE  0x87000101UL
-#define HC_VM_RESUME 0x87000102UL
-#define HC_UNUSED    0x8700FF00UL   /* no call has this id */
+#include <hypercall.h>
 
-/* Return convention: x0 = 0 or a negative errno. */
-#define HC_EPERM     (-2L)
-#define HC_ENOSYS    (-3L)
-#define HC_ENODEV    (-4L)
-#define HC_EBUSY     (-5L)
+#define HC_UNUSED 0x8700FF00UL
 
 /* One past any vmid these profiles configure: the discovery probe range. */
 #define PROBE_VMS 4
@@ -116,7 +107,7 @@ static void expect(int ok, const char *what)
 /* bit 32 of the query word: the target is paused (HV-004 F5). */
 static unsigned long paused_bit(unsigned long x1)
 {
-    return (x1 >> 32) & 1UL;
+    return (x1 & HC_VM_QUERY_PAUSED) != 0;
 }
 
 /*
@@ -191,6 +182,7 @@ void SVM_ENTRY _start(void)
     }
     expect(rc == 0L, "version rc");
     expect((x1 >> 16) == 0UL, "version major");
+    expect((x1 & 0xFFFFUL) == 2UL, "version minor");
 
     /* Own word: vmid | is-service << 16 | online vCPUs << 17. */
     mark(self);
@@ -232,7 +224,7 @@ void SVM_ENTRY _start(void)
      * on both VMs). The guest asks first and must be refused -- before the
      * Service VM's freeze can hide the answer -- then watches its own time
      * base while the Service VM freezes it for 2 s. Both timelines are fixed
-     * offsets from guest entry (~0.1 s apart on QEMU), and the freeze window
+     * offsets from guest entry (~0.2 s apart on QEMU), and the freeze window
      * never overlaps the other VM's prints: the console is shared byte by byte.
      */
     if (!is_service) {
