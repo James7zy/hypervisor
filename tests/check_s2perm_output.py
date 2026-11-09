@@ -13,9 +13,8 @@ def check(text, probe):
         "far": "0x40210000" if probe == 0 else "0x40211000",
         "elr": "0x40212000" if probe == 0 else "0x40211000",
         "wnr_valid": "1" if probe == 0 else "0",
+        "wnr": "1" if probe == 0 else "0",
     }
-    if probe == 0:
-        expected["wnr"] = "1"
     faults = list(re.finditer(r"^\[hv\] s2 fault: vCPU(\d+) ([^\r\n]*)\r?$", text, re.M))
     if len(faults) != 1 or faults[0].group(1) != "0":
         return False
