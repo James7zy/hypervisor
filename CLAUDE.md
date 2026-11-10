@@ -94,7 +94,8 @@ clearly defined units; high cohesion, low coupling. Each milestone gets a spec i
   ADR-0009 2026-10-30 修订）。不并入 `make test`，gate 语义不变。
 
 ## 提交信息（commit）
-
+1、commit 只允许出现英文。
+2、不允许出现linear的里程碑，特性标识。
 格式与范例见 [docs/reference/commit-conventions.md](docs/reference/commit-conventions.md)：
 `type(scope): subject` 标题 + 正文 + `Test:` / `Bug:` / `Fixed:` 尾部标签。
 
