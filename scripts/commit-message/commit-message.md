@@ -61,8 +61,8 @@
   （不以 `[` 开头的行不检查）。
 
 空行之后的正文完全不检查，随便写。但请写清楚**为什么**这么改——半年后有用的是这个。
-正文按 72 列换行，尾部标签沿用本仓库的 `Test:` / `Bug:` / `Fixed:`（见
-[`docs/reference/commit-conventions.md`](../../docs/reference/commit-conventions.md)）。
+正文按 72 列换行。不写尾部标签（`Test:` / `Bug:` / `Fixed:` 等）；验证证据进 Linear
+评论，见 [`docs/reference/commit-conventions.md`](../../docs/reference/commit-conventions.md)。
 
 ## 不检查的提交
 

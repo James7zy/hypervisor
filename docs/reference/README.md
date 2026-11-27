@@ -18,7 +18,7 @@
 ## 通用(根目录)
 
 - [commit-conventions.md](commit-conventions.md) — **提交信息规范**:`[领域][专项] 组件: 摘要`
-  标题 + 可选的多领域标签块 + 正文 + `Test:` / `Bug:` / `Fixed:` 尾部标签。格式定义在
+  标题 + 可选的多领域标签块 + 正文，不写尾部标签。格式定义在
   [scripts/commit-message/commit-message.md](../../scripts/commit-message/commit-message.md),
   由 `check-commit-message` 强制检查。`CLAUDE.md` §提交信息指向这里。
 - [superpowers.md](superpowers.md) — Claude Code 本地 skills 与 pi 项目包的
