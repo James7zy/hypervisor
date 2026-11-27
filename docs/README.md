@@ -1,10 +1,11 @@
 # 文档总览 / Docs
 
 本目录存放**换一台机器、换一个人仍然成立**的项目知识(判定规则见 `CLAUDE.md` 的
-"Where knowledge lives")。按"这份文档回答什么问题"分四类:
+"Where knowledge lives")。各目录的用途如下。
 
 | 目录 | 回答的问题 | 会不会改 |
 | --- | --- | --- |
+| [loop设计](loop/README.md) | 三个专家如何分工，切片如何验收与交接 | 随开发流程持续更新 |
 | [`adr/`](adr/README.md) | **为什么**这么设计,否决了什么(Status / Decision / Consequences) | 不原地改;被推翻时新开编号并标 `Superseded` |
 | [`superpowers/specs/`](superpowers/specs/)、[`plans/`](superpowers/plans/) | 某个里程碑当时**要建什么、怎么拆**(spec = 设计,plan = 执行步骤) | 历史记录,不改 |
 | [`debug/`](#debug-调试实录) | 某次问题**是怎么定位的**,按时间顺序 | 历史记录,不改 |

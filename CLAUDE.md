@@ -93,6 +93,8 @@ clearly defined units; high cohesion, low coupling. Each milestone gets a spec i
 - **纯逻辑改动**：`make host-test`（host gcc 直接编译同一份源文件，秒级；tests/host/，
   ADR-0009 2026-10-30 修订）。不并入 `make test`，gate 语义不变。
 
+切片开工、独立验收与 Linear 交接按[loop设计](docs/loop/README.md)执行。
+
 ## 提交信息（commit）
 1、commit 只允许出现英文。
 2、不允许出现linear的里程碑，特性标识。

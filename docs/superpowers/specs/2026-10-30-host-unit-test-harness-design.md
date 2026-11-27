@@ -2,7 +2,7 @@
 
 > **Status:** Approved（关卡① 2026-10-30 通过，APPROVE_WITH_CHANGES；架构师实证发现的
 > flag 集缺陷与 Makefile 集成问题已按裁决修入本文）。**日期:** 2026-10-30。
-> **来源:** [nasa-glm-loop 设计](2026-10-30-nasa-glm-loop-design.md) "分级 TDD" 一节。
+> **来源:** [loop设计](../../loop/README.md#分级-tdd)「分级 TDD」一节。
 
 ## 背景与问题
 
