@@ -1,226 +1,387 @@
-# Hypervisor Loop Engineering：三环融合设计分析
+我建议将你的三环模型与我提出的三环模型结合起来，但**不是将三个 Loop 增加到六个 Loop，而是重新区分反馈机制、执行角色和工程生命周期。**
 
-> 2026-11-27 · 设计讨论归档。本文解释设计动机、取舍和实施建议，不是第二份执行协议。
-> 正式规则以 [Loop Engineering 设计](README.md) 和 [CLAUDE.md](../../CLAUDE.md) 为准。
-> 三环融合已通过用户批准并写入 [协议提交 3f66ce1](https://github.com/James7zy/hypervisor/commit/3f66ce1390a66481d3c7b7876fbc9b115483015d)；实际运行效果仍待验证。
+你的原始设计解决的是：**AI 如何开发、如何获得外部反馈、如何向开发者反馈。**
 
-## 1. 核心判断
+我提出的设计解决的是：**如何持续交付功能、如何保证工程质量、如何让研发系统自身持续进化。**
 
-不把原有三个 Loop 增加到六个执行器，而是区分反馈机制、执行角色与工程生命周期。
+两者并不冲突，而是处于不同的抽象层次。
 
-原有 Agentic Coding、Developer Feedback、External Feedback 回答 AI 如何开发、获取客观证据及向开发者反馈。新增 Delivery、Quality、Evolution 回答工程系统分别优化什么、何时启动以及何时结束。三专家是共享执行层，不是与三个工程闭环一一对应的常驻进程。
+我倾向于保留你的三专家机制，将其作为执行层；将 Delivery、Quality、Evolution 三个不同频率的 Loop 作为工程控制层。
 
-选择这一划分的原因是功能交付、缺陷修复和研发系统改进具有不同的目标、时间尺度和验收指标。若每个任务均运行所有流程，会产生重复审查、重复测试和上下文开销；若只有功能循环，又容易重复出现同类错误，无法形成研发系统自身的改进反馈。
+## **一、Hypervisor Loop 3.0 总体架构**
 
-```mermaid
-flowchart TD
-    G["用户 / Linear / ADR：治理与授权"] --> D["Delivery：功能交付"]
-    G --> Q["Quality：产品质量"]
-    G --> E["Evolution：研发系统进化"]
-    D --> R["共享角色：架构师 / 高级研发工程师 / 测试专家"]
-    Q --> R
-    E --> R
-    R --> F["共享反馈：Agentic Coding / External Feedback / Developer Feedback"]
-    D -->|"跨切片缺陷"| Q
-    D -->|"重复失败与成本"| E
-    Q -->|"验证盲区与流程缺陷"| E
-    Q -->|"回归保护"| D
-    E -->|"用户批准的改进"| D
-    E -->|"用户批准的改进"| Q
+![01-overall](original-assets/01-overall.svg)
+
+这里有一个非常重要的变化：**一个 Agent 角色不再等于一个 Loop。**
+
+架构师、研发工程师、测试专家都可以参与不同的 Loop，但每个 Loop 的优化目标、触发条件和结束条件必须不同。
+
+## **二、如何融合你原有的三个 Loop**
+
+我重新考虑了你在 [`docs/loop/README.md`](https://github.com/James7zy/hypervisor/blob/develop/docs/loop/README.md?utm_source=chatgpt.com) 中定义的三环模型。
+
+我的建议是将它们作为贯穿三个工程 Loop 的反馈通道，而不是三个相互独立的任务执行器。
+
+| 你原有的 Loop               | 新架构中的定位                      | 是否保留  |
+| ----------------------- | ---------------------------- | ----- |
+| Agentic Coding Loop     | Delivery、Quality 中的代码实现与迭代机制 | 完整保留  |
+| Developer Feedback Loop | 三个 Loop 共用的人机反馈与决策机制         | 完整保留  |
+| External Feedback Loop  | 三个 Loop 共用的独立验证机制            | 完整保留  |
+| Delivery Loop           | 面向产品功能交付                     | 新增控制层 |
+| Quality Loop            | 面向产品缺陷和验证能力                  | 新增控制层 |
+| Evolution Loop          | 面向 AI 研发系统自身优化               | 新增控制层 |
+
+![02-feedback](original-assets/02-feedback.svg)
+
+这是我认为最适合你当前项目的融合方式。原有设计不用推翻，也不需要额外增加三个常驻 Agent。
+
+## **三、Loop 1：Delivery Loop（功能交付闭环）**
+
+主循环
+
+高频 · 每个切片执行
+
+这是你 Hypervisor 项目的主要研发驱动力，负责推进 ACRN 式多平台 Hypervisor 的路线图。
+
+![03-delivery](original-assets/03-delivery.svg)
+
+你现有的切片生命周期基本可以直接作为 Delivery Loop，不需要大改。
+
+### **我建议增加三个机制**
+
+| 机制                | 现有设计                 | 优化建议                                        |
+| ----------------- | -------------------- | ------------------------------------------- |
+| Context Reset     | 每个 Task 可派发 Subagent | 每个切片完成后清理临时上下文，只继承必要证据                      |
+| Evidence Contract | Spec、报告、日志           | 开工前明确行为、反例、验收条件及证据格式                        |
+| Commit Binding    | 提交待验版本               | 所有 Gate 和 Review 绑定最终合入版本，rebase 后重新验证受影响项目 |
+
+尤其是 Context Reset，借鉴 Ralph Wiggum 的思想：
+
+每完成一个切片，下一个切片的 Agent 不需要继承之前所有的对话，只需要读取以下信息：
+
+```
+CLAUDE.md
+CONTEXT.md
+当前 Linear Issue
+当前 Spec / Plan
+相关 ADR
+上一切片的交接报告
 ```
 
-## 2. 原设计如何复用
+Git 和 Linear 是长期状态，对话 Context 是临时运行状态。
 
-| 原有机制 | 新架构中的定位 |
-|---|---|
-| Agentic Coding Loop | 执行、测试、修正；主要用于 Delivery 与 Quality，也可用于 Evolution 的工具实验 |
-| External Feedback Loop | Host、QEMU、真机及独立 Eval 提供外部可验证证据 |
-| Developer Feedback Loop | 报告、Devlog、Linear 交接；架构取舍、用户授权和下一步决策 |
-| 架构师 | 设计、范围、优先级、架构约束与合入审查 |
-| 高级研发工程师 | 最小完整实现、复现与修复、候选工具改进 |
-| 测试专家 | 独立取证、反例、回归与 Eval 评分 |
+## **四、Loop 2：Quality Loop（工程质量闭环）**
 
-原有双阻塞关卡、分级 TDD、2-strike、约五次 subagent 派发、范围锁、Ponytail、feature → develop 线性合入以及 master 的用户所有权均保留。不能通过切换闭环重置重试预算或规避必需验收。
+事件驱动
 
-## 3. Delivery Loop：高频功能交付
+中频 · 缺陷、回归或里程碑触发
 
-目标是推进 ACRN 式多平台 Hypervisor 的能力路线图，现有切片生命周期基本可直接复用。
+你的 External Feedback Loop 已经能够在切片内部独立验收。但我认为，还需要一个不完全依附于当前功能切片的质量闭环。
 
-```mermaid
-sequenceDiagram
-    participant M as 主会话
-    participant A as 架构师
-    participant D as 高级研发工程师
-    participant T as 测试专家
-    M->>A: Linear 切片与相关约束
-    A->>D: 批准的 spec / plan 与验收条件
-    D->>D: 分级 TDD 与最小实现
-    D->>T: 待验 commit、命令、预期与缺口
-    T->>A: 独立 gate 结果与反例
-    alt 验收与 review 通过
-        A->>M: 批准最终版本
-        M->>M: 合入 develop、报告与 Linear 同步
-    else 失败或证据不足
-        A->>D: 打回修复，计入原有护栏
-    end
+区别在于：
+
+**Delivery Loop 验证本次功能能不能交付，Quality Loop 研究整个系统还有哪些正确性问题。**
+
+![04-quality](original-assets/04-quality.svg)
+
+### **Quality Loop 的任务分类**
+
+| 类型     | 具体例子                   | 处理方式                 |
+| ------ | ---------------------- | -------------------- |
+| 当前切片失败 | 新增 PSCI 接口返回错误         | Delivery 内修复，不另起任务   |
+| 历史回归   | 新调度器破坏 vTimer 行为       | Quality Loop 或阻塞当前切片 |
+| 并发缺陷   | vCPU 状态竞争              | 建立可重复的并发场景           |
+| 架构违规   | Generic 代码直接访问 ARM 寄存器 | 修复并强化架构检查            |
+| 测试假阳性  | VM 暂停实际是整个系统停顿         | 强化验证方法               |
+| 历史技术债  | 某些寄存器状态未被覆盖            | 记录 Linear，按优先级执行     |
+
+### **结合你的 Hypervisor 设计，增加主动质量发现**
+
+目前测试专家的主要职责是验证研发工程师交付的代码。
+
+我建议在 Quality Loop 中，让测试专家进一步扮演 **Adversarial Tester（对抗性测试专家）**。
+
+例如，针对虚拟化子系统主动研究以下场景：
+
+| 子系统          | 主动探索方向                         |
+| ------------ | ------------------------------ |
+| Stage-2      | 非法 IPA、越界映射、权限错误、TLBI          |
+| vGIC         | 重复注入、Pending/Active 状态竞争、LR 耗尽 |
+| Scheduler    | 饥饿、重复入队、vCPU 状态转换竞争            |
+| PSCI         | 重复 CPU_ON、非法参数、并发 OFF/ON       |
+| VM Lifecycle | VM 暂停、销毁、恢复时的竞态                |
+| vTimer       | 切换后丢失中断、重复中断、时间异常              |
+| VM Isolation | 跨 VM 内存访问、状态泄漏                 |
+
+这些问题不应该全部塞进 Delivery Loop，否则又会造成你之前经历过的里程碑前置任务不断扩张的问题。
+
+Quality Loop 的发现进入 Linear，由架构师判断是否阻塞主线。
+
+## **五、Loop 3：Evolution Loop（研发系统进化闭环）**
+
+元循环
+
+低频 · 周期性或重复失败触发
+
+这是我最建议你新增的 Loop，也是你原有设计中值得进一步强化的部分。
+
+前两个 Loop 的工作对象是 Hypervisor，第三个 Loop 的工作对象是 **开发 Hypervisor 的 AI 工程系统本身**。
+
+![05-evolution](original-assets/05-evolution.svg)
+
+### **Evolution Loop 可以优化什么？**
+
+| 观察到的工程问题           | 进化对象                 |
+| ------------------ | -------------------- |
+| Agent 经常违反架构边界     | AGENTS.md、静态检查器      |
+| Agent 经常过度设计       | Ponytail 规则、克制类 Eval |
+| 测试专家只重复研发自测        | 独立验收协议               |
+| 架构师重复 Review 同一问题  | 自动化 Lint 和架构规则       |
+| Agent 消耗大量 Context | 知识索引、交接机制            |
+| Agent 经常虚假完成任务     | Evidence Contract    |
+| Superpowers 流程过重   | Skill 触发条件与裁剪        |
+| Subagent 派发次数过多    | 调度策略、任务粒度            |
+| 三个专家重复阅读源码         | 共享证据、精简交接            |
+
+### **一个具体的进化实验**
+
+假设连续几个切片中，研发工程师都直接在 Generic 模块读取 ARM64 系统寄存器。
+
+传统处理方式是让架构师每次 Review 时指出问题。
+
+Evolution Loop 则会进行以下工作：
+
+![06-eval-example](original-assets/06-eval-example.svg)
+
+你的仓库已经存在 [`tests/agent-eval/cases.md`](https://github.com/James7zy/hypervisor/blob/develop/tests/agent-eval/cases.md?utm_source=chatgpt.com)，因此完全可以把它作为 Evolution Loop 的基础。
+
+但不要让 Evolution Loop 自己修改评分标准后宣布成功。协议、验收标准和评分器的变更仍然需要你的批准，这也符合你原有的项目授权设计。
+
+## **六、三个 Loop 应该以不同频率运行**
+
+这是整个架构设计的核心。
+
+如果三个 Loop 每完成一个 Task 就全部运行，工程开销将非常大。
+
+### **三环运行节奏示意**
+
+![07-cadence](original-assets/07-cadence.svg)
+
+Delivery：每个研发切片
+
+Quality：缺陷事件、里程碑验收
+
+Evolution：每周或累计若干切片
+
+**研发资源分配模拟**
+
+初期建议将大部分研发资源用于产品功能，而不是 AI 系统建设。以下比例为建议值，可调整。
+
+Delivery Loop
+
+**75%**
+
+Quality Loop
+
+**20%**
+
+Evolution Loop
+
+**5%**
+
+Delivery
+
+Quality
+
+Evolution
+
+![08-resources](original-assets/08-resources.svg)
+
+我建议初始资源分配采用 75% / 20% / 5%。不要因为研究 AI Loop，而让 Hypervisor 本身停止演进。
+
+## **七、三个 Loop 如何协作：以 VM Pause 为例**
+
+使用你原始文档中已经提到的 VM 暂停功能作为案例。
+
+![09-vm-pause](original-assets/09-vm-pause.svg)
+
+**Delivery Loop**
+
+实现 VM Pause 功能。
+
+架构师定义状态机，研发工程师实现暂停与恢复，测试专家验证目标 VM 停止推进、Service VM 继续运行。
+
+**Quality Loop**
+
+探索 Pause 的并发边界。
+
+主动检查双 vCPU 暂停竞争、重复 Pause、暂停期间 IRQ 到达、Pause 与 Resume 并发等情况。
+
+**Evolution Loop**
+
+分析研发系统为何可能漏掉并发问题。
+
+建立 Agent Eval，验证测试专家能否主动提出反例；如有必要，改进测试专家的工作协议。
+
+**下一个功能切片自动受益**
+
+产品正确性提高，测试能力提高，AI 研发能力也提高。
+
+这是示例性的运行过程，并不是说你的仓库已经出现上述 Pause 缺陷。
+
+最理想的结果是，经过几十个研发切片后，你不仅获得了一个功能越来越完善的 Hypervisor，也获得了一套越来越擅长 Hypervisor 开发的 AI 工程系统。
+
+## **八、三个 Loop 必须有不同的评价标准**
+
+| 评价指标           | Delivery | Quality | Evolution |
+| -------------- | -------- | ------- | --------- |
+| 切片交付周期         | ✓        |         |           |
+| 首次 Gate 通过率    | ✓        |         |           |
+| 人工干预次数         | ✓        |         | ✓         |
+| 逃逸缺陷数量         |          | ✓       |           |
+| 测试假阳性          |          | ✓       |           |
+| 回归测试稳定性        |          | ✓       |           |
+| Agent Eval 通过率 |          |         | ✓         |
+| 架构违规率          | ✓        |         | ✓         |
+| Token 消耗       | ✓        |         | ✓         |
+| 重复失败率          |          | ✓       | ✓         |
+
+不要使用代码行数、Commit 数量或者 Agent 执行次数作为主要研发效率指标。
+
+对你的项目而言，最重要的三个指标是：
+
+**Delivery**
+
+单位时间交付的已验收能力
+
+**Quality**
+
+缺陷逃逸率与验证可信度
+
+**Evolution**
+
+同类任务所需人工干预的下降幅度
+
+## **九、我建议如何修改你的仓库**
+
+遵循你自己制定的 Ponytail 原则，我不建议现在就引入 Python Orchestrator、复杂的状态机框架或新的 Multi-Agent 框架。
+
+先修改协议，再通过真实切片验证协议的有效性。
+
+```
+hypervisor/
+├── CLAUDE.md
+├── AGENTS.md
+├── CONTEXT.md
+│
+├── docs/
+│   ├── loop/
+│   │   ├── README.md       # 总体治理、三环模型
+│   │   ├── delivery.md     # 功能交付协议
+│   │   ├── quality.md      # 工程质量协议
+│   │   └── evolution.md    # 研发系统进化协议
+│   │
+│   ├── adr/
+│   ├── reports/
+│   ├── devlog/
+│   └── superpowers/
+│
+├── tests/
+│   ├── host/
+│   ├── svm/
+│   └── agent-eval/
+│
+└── scripts/
 ```
 
-三项重点改进：
+以上是建议的目标布局。初期甚至不必拆分四个文件，可以先在现有 `docs/loop/README.md` 中增加三个章节，等协议真正复杂到需要拆分时再拆。
 
-| 机制 | 为什么需要 | 落地方式 |
-|---|---|---|
-| Context Reset | 长会话累积无关上下文和历史假设 | 每片独立上下文，从 CLAUDE.md、CONTEXT.md、Linear、相关 ADR/spec/plan 和必要报告恢复 |
-| Evidence Contract | 测试通过并不必然说明预期行为成立 | 开工时定义可观察行为、反例、必需 gate；记录命令、环境、日志、未验证项 |
-| Commit Binding | rebase 或修订可能使旧证据失效 | Review 与 gate 对应最终合入版本，发生变化后复审并重跑必需 gate |
+### **建议实施顺序**
 
-Git 与 Linear 保存长期状态，会话只保存临时状态。切片可合入不等于上层能力可关闭；能力证据缺失时保留进行中，本片必需证据缺失则阻塞合入。
+1
 
-## 4. Quality Loop：中频产品质量
+**保留现有三专家切片协议**
 
-Delivery 验证当前功能是否可以交付；Quality 关注跨切片缺陷、历史回归和验证盲区。它不是将每次失败重新包装成独立任务。
+将其归属于 Delivery Loop，现有功能开发流程基本不变。
 
-```mermaid
-flowchart TD
-    A["缺陷 / 回归 / 验证盲区"] --> B["测试专家建立可复现反例"]
-    B --> C["架构师裁定影响与优先级"]
-    C -->|"阻塞当前能力"| D["按原护栏修复"]
-    C -->|"非阻塞"| L["Linear 独立排期"]
-    L --> D
-    D --> E["独立复验原反例及必需 gate"]
-    E -->|"通过"| F["沉淀回归保护与证据"]
-    E -->|"失败且预算允许"| D
-    E -->|"触发护栏"| H["停止并提交用户裁决"]
-```
+2
 
-| 发现 | 归属 |
-|---|---|
-| 本片新 PSCI 接口错误 | Delivery 内修复 |
-| 新调度器导致历史 vTimer 回归 | 阻塞本片，或由 Quality 独立处理非阻塞缺陷 |
-| 并发或隔离盲区 | Quality 建立反例，架构师决定优先级 |
-| 测试假阳性 | Quality 强化验证；若原因是 Agent 工作机制，再反馈 Evolution |
-| 非阻塞技术债 | Linear 排期，不自动扩大当前范围 |
+**建立 Quality Loop**
 
-测试专家从被动验收扩展到有范围的主动反例探索：
+先在 Linear 中区分功能任务、质量任务和验证缺口，使用已有测试工具执行。
 
-| 子系统 | 探索方向 |
-|---|---|
-| Stage-2 | IPA 边界、权限、隔离、TLBI |
-| vGIC | Pending/Active 竞态、重复注入、LR 耗尽 |
-| Scheduler | 重复入队、饥饿、vCPU 状态竞态 |
-| PSCI | 重复 CPU_ON、非法参数、并发 OFF/ON |
-| VM Lifecycle | Pause/Resume/Destroy 交错 |
-| vTimer | 切换时的丢失/重复中断与时间状态 |
+3
 
-以上均为候选测试方向，不代表已发现缺陷或已经排期。QEMU 适合功能验证，但不能直接证明真机内存序、硬件时序或性能。待验项按 Linear 跟踪。
+**建立 Evolution Loop**
 
-## 5. Evolution Loop：低频研发系统进化
+从已有 Agent Eval 用例中选择 3–5 个有代表性的用例，记录 Baseline。
 
-前两个闭环优化 Hypervisor，第三个闭环优化开发 Hypervisor 的系统：Agent、Skills、Rules、工具、上下文交接和 Harness。
+4
 
-```mermaid
-flowchart TD
-    A["真实研发失败与成本记录"] --> B["区分产品 bug、环境故障、Harness 缺陷"]
-    B --> C["提出单一可检验假设"]
-    C --> D["选取 Eval 并记录 baseline"]
-    D --> E["独立 worktree 试验最小改动"]
-    E --> F["固定评分规则进行 A/B Eval"]
-    F --> G{"证据充分且无正确性退化？"}
-    G -->|"否"| H["保留原方案"]
-    G -->|"是"| I["用户批准或拒绝"]
-    I -->|"批准"| J["更新正式 Harness"]
-    I -->|"拒绝"| H
-    J --> K["后续 Delivery / Quality 受益"]
-```
+**实际运行若干切片**
 
-| 观察到的模式 | 候选改进 |
-|---|---|
-| 重复违反 arch-neutral 边界 | CLAUDE.md、架构静态检查 |
-| 过度设计 | Ponytail 与克制类 Eval |
-| 测试专家只重复研发自测 | 独立取证协议与反例评估 |
-| 架构师反复指出同类问题 | 可执行静态规则或 Lint |
-| Context 消耗过大 | 精简交接与知识索引 |
-| 无证据宣称完成 | Evidence Contract |
-| Skills 流程过重 | 按风险和任务类型评估触发机制 |
-| Subagent 派发过多 | 任务粒度及调度策略 |
+观察交付周期、失败次数、人工介入和重复问题。
 
-现有 [Agent Eval 用例草案](../../tests/agent-eval/cases.md) 是起点，不必从零建设评测系统。例如 Generic 模块重复直接读取 ARM64 寄存器时，可先重放代表性的 shell-uptime、boot-gic-info 等任务，比较既有规则与强化静态检查后的行为。固定基线代码、模型版本、任务和预算，重复运行，并保留未用于调优的对照用例。评判实际代码状态、架构检查和运行证据，不评判 Agent 的自我陈述。
+5
 
-正确性、隔离和验收强度不得退化；测试专家独立评分，用户批准正式协议变更。不能让候选方案通过修改评分器或弱化测试证明自身有效。小样本结果不足以证明普遍提升，必须如实记录不确定性。
+**只自动化被证明存在的瓶颈**
 
-## 6. 调度：不同时间尺度，而非三个常驻 Agent
+如果手动调度、状态恢复或证据管理确实成为瓶颈，再开发专门的 Loop 执行器。
 
-| 闭环 | 节奏 | 初始资源参考 | 优先目标 |
-|---|---|---:|---|
-| Delivery | 每个批准切片 | 75% | 持续交付已验收能力 |
-| Quality | 缺陷事件、里程碑复核 | 20% | 缺陷不逃逸、反例与验证可信度 |
-| Evolution | 低频复盘或同类失败重复出现 | 5% | 降低重复失败、人工介入与成本 |
+## **十、进一步的设计：双向进化**
 
-比例仅为非阻塞工作初始参考，不是实测最优值或强制配额。正式协议试行重复失败两次，或每周/累计五片择一复盘；无明确瓶颈跳过。不启用独立后台循环。安全和正确性阻塞优先，架构师依照 Linear 裁定安排。避免复现过去前置任务不断扩张、主线停滞的问题。
+从长期来看，我希望你的 Hypervisor 项目可以形成两条相互促进的演进路径。
 
-## 7. 贯穿示例：VM Pause
+![10-coevolution](original-assets/10-coevolution.svg)
 
-以下是设计示例，不是已发现的实际缺陷或运行报告。
+| 演进对象       | 主要优化目标          | 验证机制               |
+| ---------- | --------------- | ------------------ |
+| Hypervisor | 功能、正确性、性能、隔离性   | Host、QEMU、真机       |
+| AI Harness | 自主性、准确性、效率、约束遵守 | Agent Eval         |
+| 人类开发者      | 架构理解、技术判断、工程知识  | Review、Devlog、技术决策 |
 
-| 闭环 | 工作 | 证据 |
-|---|---|---|
-| Delivery | 实现 VM 暂停、恢复及必要状态转换 | 暂停前目标双核均推进，暂停窗口内双核停止而 Service VM 继续推进，恢复后双核重新推进 |
-| Quality | 探索重复 Pause、IRQ 到达、双 vCPU 竞争及 Pause/Resume 交错 | 可复现反例、独立复验与永久回归用例 |
-| Evolution | 如发现测试专家反复遗漏并发反例，研究遗漏原因 | 固定评分下比较旧协议与候选测试协议，证明反例覆盖提升且无验收退化 |
+对于你这个研究型 Type-1 Hypervisor 项目，第三行也非常重要。不能让 AI 交付能力越来越强，而你自己对底层实现的理解越来越弱。
 
-反证是整个案例的关键：目标 VM 无输出也可能意味着整机停顿、串口路由错误或日志缺失。测试必须能够区分这些情况，而不是只检查一个成功标记。没有观察到并发缺陷时，不为了运行 Quality 或 Evolution 而虚构问题。
+因此，你原有的 Developer Feedback Loop 应当继续保留技术原理、架构取舍和验证证据的交接职责，而不是只向你报告任务完成。
 
-## 8. 度量与评价
+## **最终建议**
 
-| 指标 | Delivery | Quality | Evolution |
-|---|---|---|---|
-| 已验收能力、切片交付周期 | 主要 | — | — |
-| 首次必需 gate 通过率 | 主要 | 辅助 | 辅助 |
-| 缺陷逃逸、反例复现率 | 辅助 | 主要 | — |
-| 测试假阳性、回归稳定性 | 辅助 | 主要 | 辅助 |
-| Agent Eval 通过率、架构违规率 | 辅助 | — | 主要 |
-| 人工干预、重复失败、Token/耗时 | 主要 | 辅助 | 主要 |
+我会把你的整个系统定义为：
 
-首轮从现有报告取数，不强制新增统计系统。交付周期按批准开工至有效验收交接计算；首次 gate 通过率按首次独立验收通过的切片占比计算；缺陷逃逸以合入后发现且可归因的缺陷计数并注明观察窗口。成本和人工干预比较时保持任务难度与预算尽可能一致，缺失数据不填零。
+![11-summary](original-assets/11-summary.svg)
 
-不以代码行数、commit 数量或 Agent 调用次数单独衡量生产率。
+# **Hypervisor Agentic Engineering**
 
-## 9. 最小落地路线及否决方案
+3 个工程循环 × 3 个专家角色 × 3 个反馈通道
 
-1. 保留三专家切片协议，归入 Delivery。
-2. 用同一 Linear backlog 管理功能、质量缺陷与验收缺口，先复用现有 Host/QEMU 测试。
-3. 从已有 Agent Eval 选 3–5 个代表用例建立 baseline。
-4. 正常推进若干真实切片，记录交付、失败与介入证据。
-5. 只有实际出现重复操作瓶颈，才增量实现 runner、调度器或证据自动化。
+**工程循环**
 
-| 备选方案 | 取舍 |
-|---|---|
-| 六个独立 Loop / 更多常驻 Agent | 否决：职责与反馈混淆、调度及重复上下文成本过高 |
-| 立即引入 LangGraph/CrewAI 或 Python Orchestrator | 暂缓：现有协议足以试行，自动化需求尚未量化 |
-| 三环每片强制全量运行 | 否决：时间尺度不匹配，可能阻碍主线 |
-| 将全部质量缺口纳入前置工作 | 否决：违反范围锁，重现前置任务自我繁殖 |
-| 立即拆分多个协议文件 | 暂缓：先保留 README 单一规则来源，复杂度确实增长后再拆 |
+Delivery
 
-借鉴 Ralph Wiggum 的上下文重置、[Harness Engineering](https://openai.com/index/harness-engineering/) 的工程约束与可观察环境、[AutoResearch](https://github.com/karpathy/autoresearch) 的固定评价与实验保留/回滚思想；不要求直接安装或完整引入这些项目。现有 Superpowers 与 Ponytail 继续使用。性能优化实验可在独立任务中开展，真实硬件性能结论等待合适的真机与测量环境。
+Quality
 
-## 10. 双向进化与开发者成长
+Evolution
 
-```mermaid
-flowchart LR
-    P["Hypervisor 产品"] -->|"真实任务、缺陷与证据"| H["AI Harness"]
-    H -->|"更可靠的实现与验证"| P
-    P -->|"架构取舍、运行机制、Devlog"| U["开发者"]
-    H -->|"Eval 与研发方法经验"| U
-    U -->|"目标、授权与判断"| P
-    U -->|"批准或否决改进"| H
-```
+**专家角色**
 
-产品通过 Host/QEMU/真机验证，研发系统通过独立 Agent Eval 验证，开发者通过 Review、Devlog、架构决策和代码理解积累知识。研究型 Type-1 Hypervisor 的价值不只是产出代码，更在于理解底层机制；Developer Feedback 不能退化为简单的完成通知。
+架构师
 
-最终目标是统一治理、独立验证、持续进化：功能交付越来越稳定，产品正确性不断提升，研发系统在同类任务中的错误和人工干预逐步下降。
+研发工程师
 
-## 11. 状态与局限
+测试专家
 
-- 本文为三环融合讨论的整理归档，非原聊天逐字稿；示意图转换为 Mermaid，重复内容合并。
-- 正式协议已提交，三环运行频率、资源比例和评估方案仍属试行；未取得实际运行数据。
-- 未执行编译、QEMU、真机、Agent Eval 或 Mermaid 解析器，不将设计示例当作实测结论。
-- 本次归档不修改正式协议、不新增产品任务或后台 Agent，不关联具体 Linear issue；未同步 Linear。
+**反馈通道**
+
+Agentic Coding
+
+External Feedback
+
+Developer Feedback
+
+统一治理 · 独立验证 · 持续进化
+
+我最推荐的不是增加 Agent 数量，而是**让三个工程循环分别优化产品交付、产品质量和研发系统能力**。
+
+这次方案基于已经读取的 `develop` 分支原始 Loop 协议进行架构推演，新增的三层划分、资源比例和运行频率均属于我的设计建议，尚未经过你项目的实际运行数据验证，也没有修改仓库。
+
+如果要选择一个最有价值的突破口，我会选择 Evolution Loop。因为你的 Delivery Loop 已经有了相当完整的设计，而 Evolution Loop 可以让这套设计不再停留在静态的 Markdown 协议上，而是逐渐成为一个能够通过客观反馈持续改善自身的研发系统。
